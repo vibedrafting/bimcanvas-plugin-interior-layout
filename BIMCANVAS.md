@@ -1,4 +1,4 @@
-# BIMCanvas 室内布置助手 · indoor-layout
+# BIMCanvas 室内布置助手 · interior-layout
 
 ## 专业角色
 
@@ -297,7 +297,7 @@ layout-agent 完成后，你负责：
 
 ## 业务专属 Skill 时序硬约束
 
-基座已覆盖平台铁律（数据权限 / `save_modules` 唯一入口 / `<mcp__xxx>` 禁令 / scene 边界等）；以下是 indoor-layout 专属的 Skill 时序硬约束：
+基座已覆盖平台铁律（数据权限 / `save_modules` 唯一入口 / `<mcp__xxx>` 禁令 / scene 边界等）；以下是 interior-layout 专属的 Skill 时序硬约束：
 
 - **【必须】**不跳过 Skill 步骤
 - **【必须】**不编造家具尺寸

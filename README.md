@@ -1,4 +1,4 @@
-# indoor-layout
+# interior-layout
 
 > BIMCanvas 室内家具布置 domain plugin。覆盖**参考分析 → 规划 → 分区 → 布置**全工作流,
 > 提供 6 份运行时设计规则、家具模块库与 5 个 MCP 工具。
@@ -21,9 +21,9 @@
 > Phase 2 公开后,任意 BIMCanvas 用户走以下流程;当前 Phase 1 阶段需已拿到仓库访问权。
 
 1. 在 BIMCanvas Web → 设置页 → 插件管理 → **[+ 安装新插件]**
-2. 粘贴 `https://github.com/vibedrafting/bimcanvas-plugin-indoor-layout` → 确认
-3. 安装列表出现 `indoor-layout [未信任]` → 点 **[信任并激活]** → 二次确认 → `ExecutablePluginProbe` 通过
-4. 提示重启 → 重启后 active plugin = `indoor-layout`
+2. 粘贴 `https://github.com/vibedrafting/bimcanvas-plugin-interior-layout` → 确认
+3. 安装列表出现 `interior-layout [未信任]` → 点 **[信任并激活]** → 二次确认 → `ExecutablePluginProbe` 通过
+4. 提示重启 → 重启后 active plugin = `interior-layout`
 
 平台对插件采用 **install / trust 两阶段隔离**:安装时只做静态校验、绝不执行任何 plugin 代码;信任阶段才会调用一次 `register(builder)` dry-run。详见主仓库 [`docs/plugin-security-model.md`](https://github.com/vibedrafting/bimcanvas/blob/main/docs/plugin-security-model.md)。
 
@@ -34,7 +34,7 @@
 | `BIMCANVAS.md` | 主控 Agent 提示词(339 行) —— 五类任务路由 + generate 三种语义判定 |
 | `agents/` | 3 个 SubAgent:`layout-agent`(多分区并行) / `variant-design-agent`(multi-plan 单变体) / `module-relocation-agent`(模块替代位置探索) |
 | `skills/` | 6 个 Skill:`query-workflow` / `edit-workflow` / `generate-reference-analysis` / `generate-planning` / `generate-placement` / `generate-zoning` |
-| `mcp_tools/` | 5 个 MCP 工具,命名空间 `indoor-layout`(详见下) |
+| `mcp_tools/` | 5 个 MCP 工具,命名空间 `interior-layout`(详见下) |
 | `projectMount/modules/` | `module_library.json`(864 行家具决策规则)+ ~30 个 SVG 家具资源,bind-time 物化到项目 `modules/` |
 | `projectMount/references/` | 6 份 Markdown 运行时设计规则模板(详见下),bind-time 物化到项目 `references/` |
 
@@ -68,7 +68,7 @@
 
 每个 SubAgent **任务入场第一步强制校验派发包字段**;不满足立即停止,不调用 Skill,不调 MCP,不写入文件。
 
-## MCP 工具(`indoor-layout` 命名空间)
+## MCP 工具(`interior-layout` 命名空间)
 
 | 工具 | 用途 |
 |---|---|
@@ -78,7 +78,7 @@
 | `load_reference_analysis` | 加载当前设计区参考分析(默认最新标签,可选 `tag` 读取指定版本) |
 | `clone_scheme_to_variant` | 克隆设计区方案(canonical 或某变体)到一个或多个新变体目录;`module-relocation-agent` / `variant-design-agent` 必用 |
 
-调用名规则:`mcp__indoor-layout__<tool>`。
+调用名规则:`mcp__interior-layout__<tool>`。
 
 ## 项目级 references(运行时设计规则)
 
@@ -102,7 +102,7 @@
 | `maturity` | beta |
 | `referenceStability` | semver-tracked |
 | `defaultSceneIdPattern` | `interior-layout-{n}` |
-| `mcpNamespace` | `indoor-layout` |
+| `mcpNamespace` | `interior-layout` |
 
 **必需的平台 MCP 工具**(`canvas` 命名空间,平台基座必须提供):
 
@@ -119,7 +119,7 @@
 按 BIMCanvas 标准 plugin 沙盒模式(参考 [`vibedrafting/create-bimcanvas-plugin`](https://github.com/vibedrafting/create-bimcanvas-plugin) 的 `.dev-home/plugins/my-plugin/README.md`):
 
 1. 克隆本仓库
-2. 在仓库根创建/软链 `.dev-home/plugins/indoor-layout/` 指向本仓库根
+2. 在仓库根创建/软链 `.dev-home/plugins/interior-layout/` 指向本仓库根
 3. 配置环境变量:
    - Linux / macOS:`export BIMCANVAS_HOME="$(pwd)/.dev-home"`
    - Windows PowerShell:`$env:BIMCANVAS_HOME = "$PWD\.dev-home"`
@@ -129,7 +129,7 @@
 
 **改 `module_library.json` 后生效路径**:`projectMount/modules/module_library.json` 同上,影响**新项目**的家具决策规则。
 
-**调试 MCP 工具**:`mcp_tools/canvas_indoor_layout.py` 暴露 `register(builder)`,严格遵守两条硬约束 —— 不读 `builder.context` 字段、不做 `isinstance` 断言;一切副作用挪到 tool handler 内运行。
+**调试 MCP 工具**:`mcp_tools/canvas_interior_layout.py` 暴露 `register(builder)`,严格遵守两条硬约束 —— 不读 `builder.context` 字段、不做 `isinstance` 断言;一切副作用挪到 tool handler 内运行。
 
 ## 目录纯净纪律
 
