@@ -1,0 +1,40 @@
+# ─── BIMCanvas plugin 目录纯净纪律 ───
+# 以下文件 / 目录会污染 Claude SDK 配置链, StaticPluginValidator 会在安装时拒绝
+# (详见 vibedrafting/bimcanvas docs/BYO-Plugin.md §7)
+CLAUDE.md
+settings.local.json
+.claude/
+.bimcanvas/
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── Virtualenv ───
+venv/
+.venv/
+env/
+ENV/
+
+# ─── 编辑器 / 系统 ───
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── .dev-home 运行时产物 ───
+# 沙盒目录骨架本身不进库 (本仓库不附带 .dev-home, 由作者本地创建);
+# 若本地创建了 .dev-home, 以下运行时产物排除
+.dev-home/Projects/
+.dev-home/server_config.json
+.dev-home/plugins-state.json
+.dev-home/*.log
