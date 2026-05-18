@@ -116,7 +116,7 @@
 
 ## 本地开发
 
-按 BIMCanvas 标准 plugin 沙盒模式(参考 [`vibedrafting/create-bimcanvas-plugin`](https://github.com/vibedrafting/create-bimcanvas-plugin) 的 `.dev-home/plugins/my-plugin/README.md`):
+按 BIMCanvas 标准 plugin 沙盒模式(参考 [`vibedrafting/bimcanvas-plugin-template`](https://github.com/vibedrafting/bimcanvas-plugin-template) 的 `.dev-home/plugins/my-plugin/README.md`):
 
 1. 克隆本仓库
 2. 在仓库根创建/软链 `.dev-home/plugins/interior-layout/` 指向本仓库根
