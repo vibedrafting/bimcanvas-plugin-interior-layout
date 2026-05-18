@@ -1,6 +1,6 @@
-"""indoor-layout plugin MCP 工具入口 (主真理源 v1.1 §3.8 / 组5 §5.A.3 迁出)。
+"""interior-layout plugin MCP 工具入口 (主真理源 v1.1 §3.8 / 组5 §5.A.3 迁出)。
 
-5 个 indoor-layout 专属工具,通过 `register(builder)` 范式注册:
+5 个 interior-layout 专属工具,通过 `register(builder)` 范式注册:
 - save_semantic_plan / load_semantic_plan (语义方案标签管理)
 - save_reference_analysis / load_reference_analysis (参考分析快照管理)
 - clone_scheme_to_variant (relocation 工作流入口,仅 module-relocation-agent 调用)
@@ -9,7 +9,7 @@
 迁出后所有 5 个工具:
 - 使用 PluginContext (ctx.session / ctx.server_url) 替代模块级 aiohttp.ClientSession + SERVER_URL
 - 通过 `register(builder)` 在 plugin 加载时(`_build_mcp_servers` 内 importlib.spec_from_file_location)被注入
-- 通过 `mcpNamespace="indoor-layout"` 暴露为 `mcp__indoor-layout__<tool_name>`
+- 通过 `mcpNamespace="interior-layout"` 暴露为 `mcp__interior-layout__<tool_name>`
 
 注意:本 plugin 不依赖 platform 内的 `reference_analysis/` 模块(那是 generic 图像分析后端,仅 core analyze_image 工具用)。
 本 plugin 通过 `Read` lib/reference_prompts/reference_analysis_prompt_v1.md 后传给 core analyze_image 工具来完成参考图布局分析。
@@ -25,7 +25,7 @@ from bimcanvas_plugin_sdk import McpServerBuilder
 
 
 def register(builder: McpServerBuilder) -> None:
-    """indoor-layout plugin 注册入口 (组3 任务模板 §4.1 入口约定)。"""
+    """interior-layout plugin 注册入口 (组3 任务模板 §4.1 入口约定)。"""
     ctx = builder.context
 
     # ---------- save_semantic_plan ----------

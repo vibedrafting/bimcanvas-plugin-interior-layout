@@ -1,6 +1,6 @@
 {
   "$schema": "../../../../docs/plugin-manifest-schema.json",
-  "name": "indoor-layout",
+  "name": "interior-layout",
   "version": "1.0.0",
   "type": "bimcanvas-plugin",
   "schemaVersion": 1,
@@ -12,8 +12,8 @@
   "systemPrompt": "BIMCANVAS.md",
   "agents": "agents/",
   "skills": "skills/",
-  "mcpTools": "mcp_tools/canvas_indoor_layout.py",
-  "mcpNamespace": "indoor-layout",
+  "mcpTools": "mcp_tools/canvas_interior_layout.py",
+  "mcpNamespace": "interior-layout",
   "projectMount": {
     "manifest": "projectMount/manifest.json"
   },
