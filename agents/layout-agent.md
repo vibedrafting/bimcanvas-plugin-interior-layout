@@ -1,7 +1,7 @@
 ---
 name: layout-agent
 description: 多分区并行设计执行分身。仅接受主控 Agent 的多分区派发包；负责单个分区的完整 planning + placement。
-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, mcp__canvas__get_zone_boundaries, mcp__canvas__save_semantic_plan, mcp__canvas__load_semantic_plan, mcp__canvas__load_reference_analysis, mcp__canvas__save_reference_analysis, mcp__canvas__analyze_image
+tools: Read, Write, Edit, Glob, Grep, Skill, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, mcp__canvas__get_zone_boundaries, mcp__interior-layout__save_semantic_plan, mcp__interior-layout__load_semantic_plan, mcp__interior-layout__load_reference_analysis, mcp__interior-layout__save_reference_analysis, mcp__canvas__analyze_image
 model: inherit
 ---
 

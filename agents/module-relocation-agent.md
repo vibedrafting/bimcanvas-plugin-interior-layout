@@ -1,7 +1,7 @@
 ---
 name: module-relocation-agent
 description: 模块替代位置探索分身。接受主控派发的"目标模块重新定位包（设计区粒度，允许跨叶子）"，先 register_variant(mode=clone-from-canonical) 预创建变体目录，再在变体目录内用 Write/Edit 局部修改 modules.json，validate_layout 通过后交付。不改 canonical，不动其他变体。
-tools: Read, Write, Edit, Glob, Grep, mcp__canvas__validate_layout, mcp__canvas__get_zone_boundaries, mcp__canvas__request_background_screenshot, mcp__canvas__load_semantic_plan, mcp__canvas__register_variant
+tools: Read, Write, Edit, Glob, Grep, mcp__canvas__validate_layout, mcp__canvas__get_zone_boundaries, mcp__canvas__request_background_screenshot, mcp__interior-layout__load_semantic_plan, mcp__canvas__register_variant
 model: inherit
 ---
 
