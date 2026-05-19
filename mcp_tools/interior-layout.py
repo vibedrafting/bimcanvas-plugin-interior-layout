@@ -4,9 +4,6 @@
 - save_semantic_plan / load_semantic_plan (语义方案标签管理)
 - save_reference_analysis / load_reference_analysis (参考分析快照管理)
 
-注: 原 clone_scheme_to_variant 已合并到 platform 工具 `mcp__canvas__register_variant`
-（mode="clone-from-canonical" / "clone-from-variant"）。
-
 迁出前位置:`BIMCanvas.Agent/src/mcp/canvas.py` 的 5 个 @tool 定义。
 迁出后所有工具:
 - 使用 PluginContext (ctx.session / ctx.server_url) 替代模块级 aiohttp.ClientSession + SERVER_URL
