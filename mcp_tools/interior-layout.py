@@ -13,10 +13,10 @@ merge view / next reference tag / LegacyEmbedded 兼容)原嵌在 BIMCanvas Serv
   (GET `/api/scheme/scenes/{sceneId}/{kind}?path=` 精确读 / POST `/api/scheme/scenes/{sceneId}/artifacts/{kind}` 写)
 - Server 不再持有任何 indoor-layout 业务,只做通用 scene namespace 文件 IO + V12b 写入隔离
 
-数据落点(scene namespace):
-- canonical:schemes/{sceneId}/{zoneId}/semantic_plan.json | reference_analysis.json
-- variant:schemes/{sceneId}/{zoneId}/variants/{variantId}/semantic_plan.json
-- sceneId = ctx.active_scene_id;path 子段由工具体拼装,Server 按 path 落盘。
+数据落点(命名空间 = plugin id):
+- canonical:schemes/{active_scene}/{zoneId}/semantic_plan.json | reference_analysis.json
+- variant:schemes/{active_scene}/{zoneId}/variants/{variantId}/semantic_plan.json
+- active_scene = ctx.active_scene(= plugin id,永远有值含 projectless);path 子段由工具体拼装,Server 按 path 落盘。
 
 文件格式与旧 SemanticPlanController 保持一致(PascalCase Entries/Tag/PlanType/...),
 双轨期内两套实现读写同一文件不冲突。
@@ -193,9 +193,7 @@ def register(builder: McpServerBuilder) -> None:
         reference_analysis_tag = args.get("referenceAnalysisTag")
         variant_id = args.get("variantId")
 
-        scene_id = ctx.active_scene_id
-        if not scene_id:
-            return _error("未绑定 scene，无法保存语义方案。")
+        scene_id = ctx.active_scene
 
         # 业务校验(tag 白名单 / planType / variantId charset / canonical-only)
         try:
@@ -256,9 +254,7 @@ def register(builder: McpServerBuilder) -> None:
         zone_id = args["zoneId"]
         variant_id = args.get("variantId")
 
-        scene_id = ctx.active_scene_id
-        if not scene_id:
-            return _error("未绑定 scene，无法加载语义方案。")
+        scene_id = ctx.active_scene
 
         if not biz.is_design_zone_id(zone_id):
             return _error("semantic_plan 只归属于设计区，不归属于子分区。请传入父设计区 zoneId。")
@@ -424,9 +420,7 @@ def register(builder: McpServerBuilder) -> None:
         zone_id = args["zoneId"]
         tag = args.get("tag")
 
-        scene_id = ctx.active_scene_id
-        if not scene_id:
-            return _error("未绑定 scene，无法加载参考分析。")
+        scene_id = ctx.active_scene
 
         if not biz.is_design_zone_id(zone_id):
             return _error("reference_analysis 只归属于设计区，不归属于子分区。请传入父设计区 zoneId。")
@@ -495,9 +489,7 @@ def register(builder: McpServerBuilder) -> None:
         content = args["content"]
         source_image_id = args.get("sourceImageId", "")
 
-        scene_id = ctx.active_scene_id
-        if not scene_id:
-            return _error("未绑定 scene，无法保存参考分析。")
+        scene_id = ctx.active_scene
 
         if not biz.is_design_zone_id(zone_id):
             return _error("reference_analysis 只归属于设计区，不归属于子分区。请传入父设计区 zoneId。")

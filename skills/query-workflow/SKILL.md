@@ -16,9 +16,10 @@ allowed-tools: Read, Glob, Grep
 **步骤**：
 1. 如需空间/布局判断，先调用 `mcp__canvas__request_background_screenshot` 查看截图
 2. Read `schemes/zones.json` 定位目标分区 ID
-3. 若目标 zone 无 `subZones`，Read `schemes/{zoneId}/modules.json`
-4. 若目标 zone 有 `subZones`，聚合读取其所有叶子子分区的 `modules.json`
-   - ❌ 禁止读取 `schemes/modules.json`（此路径不存在）
+3. 若目标 zone 无 `subZones`，Read `schemes/interior-layout/{zoneId}/modules.json`
+4. 若目标 zone 有 `subZones`，聚合读取其所有叶子子分区的 `modules.json`（`schemes/interior-layout/{zoneId}/{leafId}/modules.json`）
+   - ❌ 禁止读取 `schemes/modules.json` / `schemes/interior-layout/modules.json`（这些路径不存在）
+   - 业务数据统一在 `schemes/interior-layout/` 命名空间下（`interior-layout` = 当前 plugin）
 5. 空数据检查 → 空则报告"数量为 0"
 6. 分析/统计（仅基于实际读取的数据）
 7. 验证：报告内容必须与文件实际内容一致
