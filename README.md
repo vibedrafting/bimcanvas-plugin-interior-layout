@@ -34,7 +34,7 @@
 | `BIMCANVAS.md` | 主控 Agent 提示词(339 行) —— 五类任务路由 + generate 三种语义判定 |
 | `agents/` | 3 个 SubAgent:`layout-agent`(多分区并行) / `variant-design-agent`(multi-plan 单变体) / `module-relocation-agent`(模块替代位置探索) |
 | `skills/` | 6 个 Skill:`query-workflow` / `edit-workflow` / `generate-reference-analysis` / `generate-planning` / `generate-placement` / `generate-zoning` |
-| `mcp_tools/` | 5 个 MCP 工具,命名空间 `interior-layout`(详见下) |
+| `mcp_tools/` | 4 个 MCP 工具(`interior-layout` 命名空间),业务实现在 `lib/business.py`(详见下) |
 | `projectMount/modules/` | `module_library.json`(864 行家具决策规则)+ ~30 个 SVG 家具资源,bind-time 物化到项目 `modules/` |
 | `projectMount/references/` | 6 份 Markdown 运行时设计规则模板(详见下),bind-time 物化到项目 `references/` |
 
@@ -118,6 +118,13 @@
 
 > `modules.json` 由 Agent 用 `Write` / `Edit` 工具直接编辑(保留外层 `schemeMetadata.summary` 字段),不再有专用写入 MCP 工具。
 
+**业务自包(Server 业务下沉)**:本 plugin 4 个工具(`save/load_semantic_plan`、`save/load_reference_analysis`)的全部 domain 业务
+—— tag 白名单、canonical-only 约束、planType 启发式判定、effectiveTag 优先级、merge view 合并、reference tag 算法、LegacyEmbedded 兼容 ——
+实现在 `mcp_tools/lib/business.py`(纯函数)+ `mcp_tools/interior-layout.py`(工具体),
+通过平台**通用 artifact 端点**(`POST /api/scheme/scenes/{sceneId}/artifacts/{artifactKind}` 写 + `GET ...?path=` 读)落盘。
+本 plugin 写的 artifactKinds:`semantic_plan` / `reference_analysis`。
+BIMCanvas Server 端不含任何 indoor-layout 业务。通用 IO 契约见主仓库 [`docs/plugin-architecture.md`](https://github.com/vibedrafting/BIMCanvas/blob/master/docs/plugin-architecture.md) §7.1。
+
 ## 本地开发
 
 按 BIMCanvas 标准 plugin 沙盒模式(参考 [`vibedrafting/bimcanvas-plugin-template`](https://github.com/vibedrafting/bimcanvas-plugin-template) 的 `.dev-home/plugins/my-plugin/README.md`):
@@ -133,7 +140,7 @@
 
 **改 `module_library.json` 后生效路径**:`projectMount/modules/module_library.json` 同上,影响**新项目**的家具决策规则。
 
-**调试 MCP 工具**:`mcp_tools/canvas_interior_layout.py` 暴露 `register(builder)`,严格遵守两条硬约束 —— 不读 `builder.context` 字段、不做 `isinstance` 断言;一切副作用挪到 tool handler 内运行。
+**调试 MCP 工具**:`mcp_tools/interior-layout.py` 暴露 `register(builder)`,严格遵守两条硬约束 —— 不读 `builder.context` 字段、不做 `isinstance` 断言;一切副作用挪到 tool handler 内运行。domain 业务判定在 `mcp_tools/lib/business.py`(纯函数,无 ctx / HTTP 依赖,可独立 import 调试)。
 
 ## 目录纯净纪律
 
