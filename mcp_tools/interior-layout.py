@@ -9,14 +9,14 @@ indoor-layout domain 业务(tag 白名单 / canonical-only / planType 启发式 
 merge view / next reference tag / LegacyEmbedded 兼容)原嵌在 BIMCanvas Server 的
 `SemanticPlanController.cs`(~670 行)。现已撤回 plugin:
 - 业务判定在 `lib/business.py`(纯函数,无 ctx/HTTP)
-- 工具体只做 IO:调 business 校验 + 调 Server **通用 artifact 端点**
-  (GET `/api/scheme/scenes/{sceneId}/{kind}?path=` 精确读 / POST `/api/scheme/scenes/{sceneId}/artifacts/{kind}` 写)
-- Server 不再持有任何 indoor-layout 业务,只做通用 scene namespace 文件 IO + V12b 写入隔离
+- 工具体只做 IO:调 business 校验 + 调 Server **通用 artifact 端点**(scene-agnostic)
+  (GET `/api/scheme/artifacts/{kind}?path=` 精确读 / POST `/api/scheme/artifacts/{kind}` 写)
+- Server 不再持有任何 indoor-layout 业务,只做通用文件 IO + baseline/computed 只读 gate
 
-数据落点(命名空间 = plugin id):
-- canonical:schemes/{active_scene}/{zoneId}/semantic_plan.json | reference_analysis.json
-- variant:schemes/{active_scene}/{zoneId}/variants/{variantId}/semantic_plan.json
-- active_scene = ctx.active_scene(= plugin id,永远有值含 projectless);path 子段由工具体拼装,Server 按 path 落盘。
+数据落点(按物理 zone 组织):
+- canonical:schemes/{zoneId}/semantic_plan.json | reference_analysis.json
+- variant:schemes/{zoneId}/variants/{variantId}/semantic_plan.json
+- path 子段由工具体拼装(zoneId 或 zoneId/variants/{variantId}),Server 按 path 落 schemes/{path}/。
 
 文件格式与旧 SemanticPlanController 保持一致(PascalCase Entries/Tag/PlanType/...),
 双轨期内两套实现读写同一文件不冲突。
@@ -80,11 +80,12 @@ def _error_struct(status: str, message: str, **extra: Any) -> dict[str, Any]:
 
 async def _load_artifact(ctx: Any, scene_id: str, kind: str,
                          path: str) -> tuple[int, Any, str]:
-    """GET 精确读单文件 schemes/{sceneId}/{path}/{kind}.json。
+    """GET 精确读单文件 schemes/{path}/{kind}.json(scene-agnostic)。
 
     返回 (status, parsed_json_or_none, raw_text)。连接失败 status=-1。
+    scene_id 形参保留兼容调用方,回退后不进 URL(数据按物理 zone 组织)。
     """
-    url = f"{ctx.server_url}/api/scheme/scenes/{scene_id}/{kind}"
+    url = f"{ctx.server_url}/api/scheme/artifacts/{kind}"
     try:
         async with ctx.session.get(url, params={"path": path}) as resp:
             raw = await resp.text()
@@ -100,8 +101,11 @@ async def _load_artifact(ctx: Any, scene_id: str, kind: str,
 
 async def _save_artifact(ctx: Any, scene_id: str, kind: str, path: str,
                          content: Any) -> tuple[bool, str | None]:
-    """POST 写单文件 schemes/{sceneId}/{path}/{kind}.json。返回 (ok, error_text)。"""
-    url = f"{ctx.server_url}/api/scheme/scenes/{scene_id}/artifacts/{kind}"
+    """POST 写单文件 schemes/{path}/{kind}.json(scene-agnostic)。返回 (ok, error_text)。
+
+    scene_id 形参保留兼容调用方,回退后不进 URL。
+    """
+    url = f"{ctx.server_url}/api/scheme/artifacts/{kind}"
     try:
         async with ctx.session.post(url, json={"path": path, "content": content}) as resp:
             if resp.status == 200:
@@ -177,7 +181,7 @@ def register(builder: McpServerBuilder) -> None:
                 },
                 "variantId": {
                     "type": "string",
-                    "description": "可选。非空时写变体路径 schemes/{sceneId}/{zoneId}/variants/{variantId}/semantic_plan.json；为空时写 canonical。"
+                    "description": "可选。非空时写变体路径 schemes/{zoneId}/variants/{variantId}/semantic_plan.json；为空时写 canonical。"
                                    "**spatial-skeleton / multi-plan-overview 禁止传 variantId**（这两个 tag 全局只在 canonical 出现）。"
                                    "Phase 1 暂无调用方需要传入；预留给后续 multi-plan / variant-design-agent。",
                 },
@@ -319,7 +323,7 @@ def register(builder: McpServerBuilder) -> None:
         if status_v == 404 or not isinstance(variant_doc, dict):
             return _error_struct(
                 "missing",
-                f"未找到变体语义方案 schemes/{scene_id}/{zone_id}/variants/{variant_id}/semantic_plan.json",
+                f"未找到变体语义方案 schemes/{zone_id}/variants/{variant_id}/semantic_plan.json",
                 zoneId=zone_id, variantId=variant_id,
             )
         if status_v != 200:

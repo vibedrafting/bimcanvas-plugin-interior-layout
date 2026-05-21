@@ -18,10 +18,10 @@ description: |
 **【必须】**模块布置只写入目标叶子分区的 `modules.json`。
 **【禁止】**写入 `schemes/modules.json`、`modules/modules.json`，或有 `subZones` 的容器分区 `modules.json`。
 
-示例：`rz_3` 有 `subZones=[dz_1,dz_2]` 时（业务数据统一落 `schemes/interior-layout/` 命名空间，`interior-layout` = 当前 plugin）：
-- 衣帽/梳妆家具 → `schemes/interior-layout/rz_3/dz_1/modules.json`
-- 睡眠家具 → `schemes/interior-layout/rz_3/dz_2/modules.json`
-- 禁止 → 容器级 `schemes/interior-layout/rz_3/modules.json` 或根级 `schemes/modules.json`
+示例：`rz_3` 有 `subZones=[dz_1,dz_2]` 时（业务数据按物理 zone 组织在 `schemes/{zoneId}/` 下）：
+- 衣帽/梳妆家具 → `schemes/rz_3/dz_1/modules.json`
+- 睡眠家具 → `schemes/rz_3/dz_2/modules.json`
+- 禁止 → 容器级 `schemes/rz_3/modules.json` 或根级 `schemes/modules.json`
 
 WHY：Server 和验证器按叶子分区加载模块。写到根级或容器分区会导致“0 个模块，0 个错误”的假成功。
 
@@ -136,7 +136,7 @@ load_semantic_plan({ zoneId })
 
 **【必须】**用 `Write` / `Edit` 工具直接编辑 `modules.json` 文件。modules.json 形态为 wrapper `{schemeMetadata: {summary}, modules: [...]}`：
 
-- **canonical** 写入（无 variant）：路径 `schemes/interior-layout/{designZoneId}/modules.json`（顶层叶子）或 `schemes/interior-layout/{designZoneId}/{leafZoneId}/modules.json`（嵌套叶子）。首次写入时 `schemeMetadata.summary` 可为空字符串。
+- **canonical** 写入（无 variant）：路径 `schemes/{designZoneId}/modules.json`（顶层叶子）或 `schemes/{designZoneId}/{leafZoneId}/modules.json`（嵌套叶子）。首次写入时 `schemeMetadata.summary` 可为空字符串。
 - **variant** 写入：调用方应先调 `mcp__canvas__register_variant` 创建目录骨架；之后只用 `Write` / `Edit` 修改 `modules` 数组，**必须保留 register_variant 写入的 `schemeMetadata.summary`**。
 
 写入模板（Write 整个文件内容）：

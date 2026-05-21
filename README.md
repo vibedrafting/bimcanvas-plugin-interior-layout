@@ -121,7 +121,7 @@
 **业务自包(Server 业务下沉)**:本 plugin 4 个工具(`save/load_semantic_plan`、`save/load_reference_analysis`)的全部 domain 业务
 —— tag 白名单、canonical-only 约束、planType 启发式判定、effectiveTag 优先级、merge view 合并、reference tag 算法、LegacyEmbedded 兼容 ——
 实现在 `mcp_tools/lib/business.py`(纯函数)+ `mcp_tools/interior-layout.py`(工具体),
-通过平台**通用 artifact 端点**(`POST /api/scheme/scenes/{sceneId}/artifacts/{artifactKind}` 写 + `GET ...?path=` 读)落盘。
+通过平台**通用 artifact 端点**(`POST /api/scheme/artifacts/{artifactKind}` 写 + `GET ...?path=` 读)落盘。
 本 plugin 写的 artifactKinds:`semantic_plan` / `reference_analysis`。
 BIMCanvas Server 端不含任何 indoor-layout 业务。通用 IO 契约见主仓库 [`docs/plugin-architecture.md`](https://github.com/vibedrafting/BIMCanvas/blob/master/docs/plugin-architecture.md) §7.1。
 
