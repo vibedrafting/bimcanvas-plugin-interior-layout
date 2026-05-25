@@ -20,6 +20,7 @@ allowed-tools: Read, Glob, Grep
 4. 若目标 zone 有 `subZones`，聚合读取其所有叶子子分区的 `modules.json`（`schemes/{zoneId}/{leafId}/modules.json`）
    - ❌ 禁止读取 `schemes/modules.json`（这个路径不存在）
    - 业务数据按物理 zone 组织在 `schemes/{zoneId}/` 下
+   - ⚠️ `modules.json` 不存在 = 该叶子**尚未布置任何家具**（空），视作 0 个模块，**不报错**、继续聚合其余叶子。平台不再为叶子预写空文件，首次布置时才落地。
 5. 空数据检查 → 空则报告"数量为 0"
 6. 分析/统计（仅基于实际读取的数据）
 7. 验证：报告内容必须与文件实际内容一致
