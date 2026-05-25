@@ -367,3 +367,261 @@ def utc_now_iso() -> str:
     业务排序用 Tag 而非时间戳,差异不影响行为。
     """
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# ============================================================
+# 布局/边界报告格式化(从 core-base canvas.py 迁入)
+#
+# validate_layout / get_zone_boundaries 工具的呈现层:把 Server 返回的
+# SchemeValidationReport / ModuleNormalizationReport / ZoneBoundaryData
+# 渲染为室内布置 domain 的 AI 友好文本(墙方位 / penetration 修正方向 / passage 通道)。
+# 纯函数,无 ctx / HTTP 依赖。
+# ============================================================
+
+def format_validation_report(report: dict[str, Any]) -> str:
+    """将 SchemeValidationReport JSON 格式化为 AI 友好文本"""
+    total = report.get("totalModules", 0)
+    error_count = report.get("errorCount", 0)
+    warning_count = report.get("warningCount", 0)
+    elapsed = report.get("elapsedMs", 0)
+    diagnostics = report.get("diagnostics", [])
+
+    if report.get("isValid", True) and error_count == 0:
+        if warning_count > 0:
+            header = f"=== 布局验证通过({warning_count} 个警告)==="
+            summary = f"共 {total} 个模块,0 个错误,{warning_count} 个警告 ({elapsed}ms)"
+        else:
+            return f"=== 布局验证通过 ===\n共 {total} 个模块,0 个错误 ({elapsed}ms)"
+        lines = [header, summary, ""]
+    else:
+        lines = [
+            "=== 布局验证失败 ===",
+            f"共 {total} 个模块,{error_count} 个错误,{warning_count} 个警告 ({elapsed}ms)",
+            "",
+        ]
+
+    by_code: dict[str, list[dict[str, Any]]] = {}
+    for d in diagnostics:
+        code = d.get("code", "UNKNOWN")
+        by_code.setdefault(code, []).append(d)
+
+    _reverse_dir = {"north": "south", "south": "north", "east": "west", "west": "east"}
+    _dir_cn = {"north": "北", "south": "南", "east": "东", "west": "西"}
+
+    for code, diags in by_code.items():
+        errors_in_group = sum(1 for d in diags if d.get("severity") == "error")
+        warnings_in_group = sum(1 for d in diags if d.get("severity") == "warning")
+        count_parts = []
+        if errors_in_group > 0:
+            count_parts.append(f"{errors_in_group} 个错误")
+        if warnings_in_group > 0:
+            count_parts.append(f"{warnings_in_group} 个警告")
+        count_label = ",".join(count_parts) if count_parts else f"{len(diags)} 个"
+        lines.append(f"--- {code} ({count_label}) ---")
+
+        for d in diags:
+            severity = d.get("severity", "error")
+            prefix = "⚠" if severity == "warning" else "✗"
+            module_id = d.get("moduleId", "?")
+            module_name = d.get("moduleName")
+            name_part = f" ({module_name})" if module_name else ""
+            conflict_id = d.get("conflictId")
+            conflict_type = d.get("conflictType")
+            if conflict_id and conflict_type:
+                if conflict_type == "module":
+                    base_line = f"  {prefix} {module_id}{name_part} ↔ {conflict_type}:{conflict_id}"
+                else:
+                    base_line = f"  {prefix} {module_id}{name_part} ← {conflict_type}:{conflict_id}"
+            else:
+                base_line = f"  {prefix} {module_id}{name_part}"
+
+            msg = d.get("message")
+            if msg:
+                base_line += f"\n    → {msg}"
+
+            penetration = d.get("penetrationDepthMm")
+            direction = d.get("penetrationDirection")
+            area = d.get("overlapAreaMm2")
+            if penetration is not None and direction is not None and penetration > 0:
+                fix_dir = _reverse_dir.get(direction, direction)
+                fix_cn = _dir_cn.get(fix_dir, fix_dir)
+                action = "建议" if severity == "warning" else "修正"
+                hint = f" | {action}:向{fix_cn}移动 {penetration}mm"
+                if area is not None:
+                    hint += f"(重叠 {area}mm²)"
+                base_line += hint
+
+            lines.append(base_line)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_normalization_report(report: dict[str, Any]) -> str:
+    """将 ModuleNormalizationReport JSON 格式化为 AI 友好文本"""
+    total = report.get("totalModules", 0)
+    normalized_count = report.get("normalizedCount", 0)
+    error_count = report.get("errorCount", 0)
+    warning_count = report.get("warningCount", 0)
+    elapsed = report.get("elapsedMs", 0)
+    diagnostics = report.get("diagnostics", [])
+
+    if report.get("isValid", True) and error_count == 0:
+        if warning_count > 0:
+            lines = [
+                f"=== 模块数据规范化完成({warning_count} 个警告)===",
+                f"共 {total} 个模块,规范化 {normalized_count} 个,0 个错误,{warning_count} 个警告 ({elapsed}ms)",
+                "",
+            ]
+        else:
+            return f"=== 模块数据规范化完成 ===\n共 {total} 个模块,规范化 {normalized_count} 个,0 个错误 ({elapsed}ms)"
+    else:
+        lines = [
+            "=== 模块数据规范化失败 ===",
+            f"共 {total} 个模块,规范化 {normalized_count} 个,{error_count} 个错误,{warning_count} 个警告 ({elapsed}ms)",
+            "",
+        ]
+
+    by_code: dict[str, list[dict[str, Any]]] = {}
+    for d in diagnostics:
+        code = d.get("code", "UNKNOWN")
+        by_code.setdefault(code, []).append(d)
+
+    for code, diags in by_code.items():
+        errors_in_group = sum(1 for d in diags if d.get("severity") == "error")
+        warnings_in_group = sum(1 for d in diags if d.get("severity") == "warning")
+        count_parts = []
+        if errors_in_group > 0:
+            count_parts.append(f"{errors_in_group} 个错误")
+        if warnings_in_group > 0:
+            count_parts.append(f"{warnings_in_group} 个警告")
+        count_label = ",".join(count_parts) if count_parts else f"{len(diags)} 个"
+        lines.append(f"--- {code} ({count_label}) ---")
+
+        for d in diags:
+            severity = d.get("severity", "error")
+            prefix = "⚠" if severity == "warning" else "✗"
+            module_id = d.get("moduleId", "?")
+            module_name = d.get("moduleName")
+            name_part = f" ({module_name})" if module_name else ""
+            line = f"  {prefix} {module_id}{name_part}"
+            msg = d.get("message")
+            if msg:
+                line += f"\n    → {msg}"
+            lines.append(line)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _segment_direction_label(dx: float, dy: float) -> str:
+    """根据方向向量返回方位标签:东/南/西/北/斜边"""
+    if abs(dx) < 1e-3 and abs(dy) < 1e-3:
+        return "斜边"
+    if abs(dx) < 1e-3:
+        return "东墙" if dy > 0 else "西墙"
+    if abs(dy) < 1e-3:
+        return "南墙" if dx > 0 else "北墙"
+    return "斜边"
+
+
+def _segment_length(start: list, end: list) -> int:
+    """计算段长度(毫米,取整)"""
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    return round((dx * dx + dy * dy) ** 0.5)
+
+
+def format_zone_boundaries(data: list[dict[str, Any]]) -> str:
+    """将 ZoneBoundaryData 列表格式化为按墙面分组的 AI 友好文本。"""
+    if not data:
+        return "没有找到 zone 边界数据"
+
+    all_zone_lines: list[str] = []
+    for zone_data in data:
+        zone_id = zone_data.get("zoneId", "?")
+        segments = zone_data.get("segments", [])
+        if not segments:
+            all_zone_lines.append(f"=== {zone_id} 边界语义 (0 面墙) ===")
+            all_zone_lines.append("")
+            continue
+
+        seg_infos = []
+        for seg in segments:
+            start = seg.get("start", [0, 0])
+            end = seg.get("end", [0, 0])
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            label = _segment_direction_label(dx, dy)
+            length = _segment_length(start, end)
+            seg_infos.append({
+                "seg": seg,
+                "label": label,
+                "length": length,
+                "start": start,
+                "end": end,
+            })
+
+        walls: list[list[dict]] = []
+        current_wall: list[dict] = [seg_infos[0]]
+        for i in range(1, len(seg_infos)):
+            if seg_infos[i]["label"] != seg_infos[i - 1]["label"]:
+                walls.append(current_wall)
+                current_wall = [seg_infos[i]]
+            else:
+                current_wall.append(seg_infos[i])
+        walls.append(current_wall)
+
+        label_counts: dict[str, int] = {}
+        for wall in walls:
+            lbl = wall[0]["label"]
+            label_counts[lbl] = label_counts.get(lbl, 0) + 1
+
+        all_zone_lines.append(f"=== {zone_id} 边界语义 ({len(walls)} 面墙) ===")
+        all_zone_lines.append("")
+
+        label_index: dict[str, int] = {}
+        for wall in walls:
+            lbl = wall[0]["label"]
+            total_length = sum(s["length"] for s in wall)
+            wall_length = sum(s["length"] for s in wall if s["seg"].get("type") == "wall")
+
+            if label_counts[lbl] > 1:
+                idx = label_index.get(lbl, 0) + 1
+                label_index[lbl] = idx
+                wall_name = f"{lbl}{chr(0x2080 + idx)}"
+            else:
+                wall_name = lbl
+
+            all_wall = all(s["seg"].get("type") == "wall" for s in wall)
+            all_passage = all(s["seg"].get("type") == "passage" for s in wall)
+            if all_passage:
+                adj = wall[0]["seg"].get("adjacent", "")
+                summary = f"通道(→{adj})" if adj else "通道"
+            elif all_wall:
+                summary = "完整实墙"
+            else:
+                summary = f"实墙 {wall_length}mm"
+
+            all_zone_lines.append(f"{wall_name} | 总长 {total_length}mm | {summary}")
+
+            for s in wall:
+                seg = s["seg"]
+                seg_type = seg.get("type", "?")
+                seg_id = seg.get("id")
+                start = s["start"]
+                end = s["end"]
+                length = s["length"]
+                if seg_type == "wall":
+                    all_zone_lines.append(f"  wall {length}mm [{start[0]},{start[1]}]→[{end[0]},{end[1]}]")
+                else:
+                    id_part = f"({seg_id})" if seg_id else ""
+                    adj = seg.get("adjacent")
+                    adj_part = f"→{adj}" if adj and seg_type == "passage" else ""
+                    all_zone_lines.append(
+                        f"  {seg_type}{id_part}{adj_part} {length}mm [{start[0]},{start[1]}]→[{end[0]},{end[1]}]"
+                    )
+
+            all_zone_lines.append("")
+
+    return "\n".join(all_zone_lines)

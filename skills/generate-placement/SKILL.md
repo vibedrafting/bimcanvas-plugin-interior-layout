@@ -63,7 +63,7 @@ load_semantic_plan({ zoneId })
 
 **【必须】**placement 只读取 `construction-brief.content`。不得调用 `load_reference_analysis`，也不得根据历史 reference 文件补充理解。
 
-**【必须】**`load_semantic_plan` 之后，立刻调用 `mcp__canvas__get_zone_boundaries({ zoneId })`，并读取 `computed/exclusions.json`。
+**【必须】**`load_semantic_plan` 之后，立刻调用 `mcp__interior-layout__get_zone_boundaries({ zoneId })`，并读取 `computed/exclusions.json`。
 
 **【必须】**`zone boundaries`、`passage`、`exclusions` 与 `construction-brief` 合同并列为施工前事实，不得等 `validate_layout` 报错后才第一次考虑。
 
@@ -74,7 +74,7 @@ load_semantic_plan({ zoneId })
 **必读输入**：
 
 - `load_semantic_plan` 返回的 `construction-brief`
-- `mcp__canvas__get_zone_boundaries({ zoneId })`
+- `mcp__interior-layout__get_zone_boundaries({ zoneId })`
 - `computed/exclusions.json`
 - `references/design_principles.md`
 - `references/design_evaluation.md`
@@ -86,7 +86,7 @@ load_semantic_plan({ zoneId })
 **读取顺序**：
 
 1. 先读 `load_semantic_plan` 返回的 `construction-brief`
-2. 再读 `mcp__canvas__get_zone_boundaries({ zoneId })`
+2. 再读 `mcp__interior-layout__get_zone_boundaries({ zoneId })`
 3. 再读 `computed/exclusions.json`
 4. 最后读模块库、房间策略、当前目标叶子分区的 `modules.json`、设计原则与评估规则
 
@@ -247,7 +247,7 @@ load_semantic_plan({ zoneId })
 - 若验证失败且需要语义级改图 → 升级处理
 - 若多次失败 → 汇报失败原因
 
-**【必须】**一次性写入完整结果，再调用 `mcp__canvas__validate_layout({ zoneIds: [目标叶子zoneIds] })`。
+**【必须】**一次性写入完整结果，再调用 `mcp__interior-layout__validate_layout({ zoneIds: [目标叶子zoneIds] })`。
 
 **验证闸门**：
 - 验证报告中的模块总数必须与本轮目标叶子文件中的模块总数一致

@@ -143,7 +143,7 @@ description: |
    - `modules/module_library.json`
    - `schemes/zones.json`
    - `computed/exclusions.json`
-3. 调用 `mcp__canvas__get_zone_boundaries`
+3. 调用 `mcp__interior-layout__get_zone_boundaries`
 4. 根据当前 zone tags 读取对应房间策略文件：
    - 卧室：`references/bedroom.md`
    - 卫生间：`references/bathroom.md`

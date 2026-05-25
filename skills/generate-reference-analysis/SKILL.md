@@ -77,7 +77,7 @@ description: |
 - `schemes/zones.json`
 - `computed/exclusions.json`
 - `mcp__canvas__request_background_screenshot`
-- `mcp__canvas__get_zone_boundaries`
+- `mcp__interior-layout__get_zone_boundaries`
 - `mcp__canvas__analyze_image`（仅本 Skill 的 Stage A 可用，必须先 `Read` 本 plugin 提供的 prompt 文件 `${BIMCANVAS_HOME}/plugins/interior-layout/mcp_tools/lib/reference_prompts/reference_analysis_prompt_v1.md`，再把整文件文本作为 `task` 参数传入；不允许用临时 prompt / generic task 描述）
 - `mcp__canvas__load_reference_analysis`（仅当用户要求修订既有分析时）
 - `modules/module_library.json` 的契约层字段（如尺寸、标签、限制）
@@ -222,7 +222,7 @@ mcp__canvas__analyze_image({projectPath, attachmentId, task: <prompt-text>})
 
 **这一步必须读取**：
 1. `mcp__canvas__request_background_screenshot`
-2. `mcp__canvas__get_zone_boundaries`
+2. `mcp__interior-layout__get_zone_boundaries`
 3. `computed/exclusions.json`
 
 **这一步必须完成**：

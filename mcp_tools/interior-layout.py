@@ -515,3 +515,114 @@ def register(builder: McpServerBuilder) -> None:
             "content": [{"type": "text", "text": f"参考分析结果已保存为 {next_tag}。"}],
             "structuredContent": {"saved": True, "zoneId": zone_id, "tag": next_tag},
         }
+
+    # ---------- validate_layout ----------
+    @builder.tool(
+        "validate_layout",
+        "验证当前方案的布局合法性(布局编译器)。调用时会先将目标 modules.json 中有效的 facing.semantic "
+        "收敛为 facing.value 并清空 semantic;规范化无错误后再检查三类错误:(1)超出设计区域 (2)与墙体/柱子/禁区重叠 "
+        "(3)模块间重叠。可选 zoneIds 参数仅验证指定分区内的模块。可选 variantId 参数仅供 module-relocation-agent "
+        "用于验证 modules-{variantId}.json 变体文件,必须与非空 zoneIds 同时使用。",
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "zoneIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可选。仅验证这些 Zone 内的模块(如 [\"rz_1\", \"dz_2\"])。不传则验证全部模块。",
+                },
+                "variantId": {
+                    "type": "string",
+                    "description": "可选。验证非 canonical 变体文件,如 'alt-1' → 读取每个目标 Zone 下的 modules-alt-1.json。仅 module-relocation-agent 使用;layout-agent / generate-placement / 其他工作流必须留空。非空时必须与非空 zoneIds 同时提供。",
+                },
+            },
+            "additionalProperties": False,
+        },
+    )
+    async def validate_layout(args: dict[str, Any]) -> dict[str, Any]:
+        """验证当前方案的布局合法性(布局编译器)"""
+        zone_ids = args.get("zoneIds")
+        variant_id = args.get("variantId")
+        if variant_id and not zone_ids:
+            return _error("validate_layout 错误: variantId 非空时必须显式指定 zoneIds(不允许全分区扫描变体)")
+        body: dict[str, Any] = {}
+        if zone_ids:
+            body["zoneIds"] = zone_ids
+        if variant_id:
+            body["variantId"] = variant_id
+
+        try:
+            async with ctx.session.post(f"{ctx.server_url}/api/modules/normalize", json=body) as resp:
+                if resp.status != 200:
+                    try:
+                        error_data = await resp.json()
+                        error_msg = error_data.get("message", f"HTTP {resp.status}")
+                    except Exception:
+                        error_msg = await resp.text()
+                    return _error(f"规范化请求失败: {error_msg}")
+
+                normalize_report = await resp.json()
+                if normalize_report.get("errorCount", 0) > 0:
+                    return _error(biz.format_normalization_report(normalize_report))
+
+            async with ctx.session.post(f"{ctx.server_url}/api/validation/layout", json=body) as resp:
+                if resp.status != 200:
+                    try:
+                        error_data = await resp.json()
+                        error_msg = error_data.get("message", f"HTTP {resp.status}")
+                    except Exception:
+                        error_msg = await resp.text()
+                    return _error(f"验证请求失败: {error_msg}")
+
+                report = await resp.json()
+                return _text(biz.format_validation_report(report))
+
+        except aiohttp.ClientError as e:
+            return _error(f"无法连接 Server: {e}")
+
+    # ---------- get_zone_boundaries ----------
+    @builder.tool(
+        "get_zone_boundaries",
+        "获取 Zone 边界语义数据:将 zone 的多边形边界拆分为 wall/passage/door/window 段,"
+        "帮助理解每条边的物理含义。子分区场景下区分实墙和通道。",
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "zoneIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可选。指定要查询的 Zone ID 列表(如 [\"dz_1\", \"dz_2\"])。不传则返回所有叶子 zone 的边界段数据。",
+                }
+            },
+            "additionalProperties": False,
+        },
+    )
+    async def get_zone_boundaries(args: dict[str, Any]) -> dict[str, Any]:
+        """获取 Zone 边界段语义数据"""
+        zone_ids = args.get("zoneIds")
+        body: dict[str, Any] = {}
+        if zone_ids:
+            body["zoneIds"] = zone_ids
+        body = body or None
+
+        try:
+            async with ctx.session.post(
+                f"{ctx.server_url}/api/validation/zone-boundaries", json=body
+            ) as resp:
+                if resp.status == 400:
+                    return _error("错误: 没有加载的项目")
+                if resp.status != 200:
+                    try:
+                        error_data = await resp.json()
+                        error_msg = error_data.get("message", f"HTTP {resp.status}")
+                    except Exception:
+                        error_msg = await resp.text()
+                    return _error(f"获取边界数据失败: {error_msg}")
+
+                data = await resp.json()
+                return _text(biz.format_zone_boundaries(data))
+
+        except aiohttp.ClientError as e:
+            return _error(f"无法连接 Server: {e}")

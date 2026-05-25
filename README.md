@@ -14,7 +14,7 @@
 
 - **输入**:`.bcp` 项目(baseline 户型 + 既有 schemes)+ 用户自然语言指令(可附参考图)
 - **输出**:`schemes/{sceneId}/.../modules.json`(家具布置)、`semantic_plan.json`(可施工合同)、`reference_analysis.json`(参考图分析快照)
-- **边界**:只做"放哪/为什么/怎么放";几何 / 碰撞 / 边界由平台基座 `mcp__canvas__validate_layout` 统一验证
+- **边界**:只做"放哪/为什么/怎么放";几何 / 碰撞 / 边界由平台基座 `mcp__interior-layout__validate_layout` 统一验证
 
 ## 安装与启用
 
@@ -107,8 +107,8 @@
 
 **必需的平台 MCP 工具**(`canvas` 命名空间,平台基座必须提供):
 
-- `mcp__canvas__validate_layout` — 几何 / 碰撞验证
-- `mcp__canvas__get_zone_boundaries` — 分区边界
+- `mcp__interior-layout__validate_layout` — 几何 / 碰撞验证
+- `mcp__interior-layout__get_zone_boundaries` — 分区边界
 - `mcp__canvas__register_variant` — 变体目录注册(申请制,三种 mode:`blank` / `clone-from-canonical` / `clone-from-variant`)
 - `mcp__canvas__list_variants` — 列出指定设计区下所有变体
 - `mcp__canvas__analyze_image` — 图像分析
