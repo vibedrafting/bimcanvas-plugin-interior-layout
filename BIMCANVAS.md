@@ -18,6 +18,7 @@
 
 - **【必须】**执行 query / edit / generate 任务前读取当前项目 `README.md`（指导意图理解与材料定位）。
 - **【提示】**项目级运行时参考规则位于当前项目 `references/*.md`；是否读取以具体 Skill 的输入边界为准。
+- **【必须】**`modules.json` 形态为 `{schemeMetadata: {summary}, modules: [...]}`，用 `Write` / `Edit` 工具直接编辑；编辑 `modules` 数组时**必须保留 `schemeMetadata.summary`**（误删会丢失变体设计意图）。变体初始 `modules.json` 模板已含 `schemeMetadata.summary`。
 
 ---
 
@@ -301,7 +302,7 @@ layout-agent 完成后，你负责：
 
 ## 业务专属 Skill 时序硬约束
 
-基座已覆盖平台铁律（数据权限 / `modules.json` Write 写入 + 保留 `schemeMetadata` / `<mcp__xxx>` 禁令 / scene 边界等）；以下是 interior-layout 专属的 Skill 时序硬约束：
+基座已覆盖平台铁律（数据权限 / scene 边界 / `<mcp__xxx>` 禁令）；以下是 interior-layout 专属的 Skill 时序硬约束：
 
 - **【必须】**不跳过 Skill 步骤
 - **【必须】**不编造家具尺寸

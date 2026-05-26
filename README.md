@@ -76,6 +76,8 @@
 | `load_semantic_plan` | 加载当前设计区生效语义方案(可施工图纸,非完整历史) |
 | `save_reference_analysis` | 提交完整参考分析快照(v1 客观 / v2 差异 / v3 用户确认 / v4+ 修订) |
 | `load_reference_analysis` | 加载当前设计区参考分析(默认最新标签,可选 `tag` 读取指定版本) |
+| `validate_layout` | 几何 / 碰撞 / 边界验证(几何下沉:Server `/api/modules/normalize` + `/api/validation/layout`) |
+| `get_zone_boundaries` | 读取设计区与叶子分区边界语义(参数:`zoneId` 或 `zoneIds`) |
 
 调用名规则:`mcp__interior-layout__<tool>`。
 
@@ -107,8 +109,6 @@
 
 **必需的平台 MCP 工具**(`canvas` 命名空间,平台基座必须提供):
 
-- `mcp__interior-layout__validate_layout` — 几何 / 碰撞验证
-- `mcp__interior-layout__get_zone_boundaries` — 分区边界
 - `mcp__canvas__register_variant` — 变体目录注册(申请制,三种 mode:`blank` / `clone-from-canonical` / `clone-from-variant`)
 - `mcp__canvas__list_variants` — 列出指定设计区下所有变体
 - `mcp__canvas__analyze_image` — 图像分析
