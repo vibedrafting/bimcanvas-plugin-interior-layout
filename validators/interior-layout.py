@@ -50,6 +50,26 @@ E_INVALID_BOUNDS = "E012_INVALID_BOUNDS"
 E_INVALID_MODULE_FILE_PATH = "E013_INVALID_MODULE_FILE_PATH"
 E_DUPLICATE_ZONE_MODULE_FILES = "E014_DUPLICATE_ZONE_MODULE_FILES"
 
+# ZoneType 兼容：on-disk 数据用 camelCase 字符串("room"/"designable"/"exclusion")；
+# C# Newtonsoft 读 enum 时字符串/整数都能 parse，Python 直读文件须显式兼容两种表示。
+_ZONE_TYPE_ALIASES = {
+    "exclusion": ZONE_EXCLUSION,
+    "room": ZONE_ROOM,
+    "designable": ZONE_DESIGNABLE,
+}
+
+
+def _zone_type(z: dict):
+    """规整 zone.type → 整数(0/1/2)或 None。兼容整数与 camelCase 字符串两种序列化。"""
+    t = z.get("type")
+    if isinstance(t, str):
+        return _ZONE_TYPE_ALIASES.get(t.strip().lower())
+    if isinstance(t, bool):
+        return None
+    if isinstance(t, int):
+        return t if t in (ZONE_EXCLUSION, ZONE_ROOM, ZONE_DESIGNABLE) else None
+    return None
+
 
 # ── 入口 ────────────────────────────────────────────────────────
 def run(request: dict) -> dict:
@@ -256,7 +276,7 @@ def _validate_scheme(modules: list[dict], design_zones: list[dict], exclusion_zo
     # zoneCache：Room/Designable + (target None 或 id 命中)；boundary = computed ?? raw
     zone_cache = []
     for z in design_zones:
-        if z.get("type") not in (ZONE_ROOM, ZONE_DESIGNABLE):
+        if _zone_type(z) not in (ZONE_ROOM, ZONE_DESIGNABLE):
             continue
         if target_raw is not None and z.get("id") not in target_raw:
             continue
@@ -267,7 +287,7 @@ def _validate_scheme(modules: list[dict], design_zones: list[dict], exclusion_zo
     # exclusionCache：Exclusion；boundary = raw ?? computed
     excl_cache = []
     for z in exclusion_zones:
-        if z.get("type") != ZONE_EXCLUSION:
+        if _zone_type(z) != ZONE_EXCLUSION:
             continue
         b = z.get("rawBoundary") or z.get("computedBoundary")
         if b is not None:
