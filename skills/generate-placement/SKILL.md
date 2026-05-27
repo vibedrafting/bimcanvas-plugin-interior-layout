@@ -247,7 +247,7 @@ load_semantic_plan({ zoneId })
 - 若验证失败且需要语义级改图 → 升级处理
 - 若多次失败 → 汇报失败原因
 
-**【必须】**一次性写入完整结果，再调用 `mcp__interior-layout__validate_layout({ zoneIds: [目标叶子zoneIds] })`。
+**【必须】**一次性写入完整结果，再调用 `mcp__canvas__validate_layout({ zoneIds: [目标叶子zoneIds] })`。
 
 **验证闸门**：
 - 验证报告中的模块总数必须与本轮目标叶子文件中的模块总数一致

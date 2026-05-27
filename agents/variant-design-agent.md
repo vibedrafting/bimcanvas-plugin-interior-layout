@@ -1,7 +1,7 @@
 ---
 name: variant-design-agent
 description: multi-plan 模式专属单变体执行单位。仅接受主控的 multi-plan 派发包；在 `schemes/{designZoneId}/variants/{slug}/` 内完成单一变体的 strategic-plan + construction-brief + modules + validate，不动 canonical。
-tools: Read, Write, Edit, Glob, Grep, Skill, mcp__interior-layout__validate_layout, mcp__canvas__request_background_screenshot, mcp__interior-layout__get_zone_boundaries, mcp__interior-layout__save_semantic_plan, mcp__interior-layout__load_semantic_plan, mcp__canvas__register_variant
+tools: Read, Write, Edit, Glob, Grep, Skill, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, mcp__interior-layout__get_zone_boundaries, mcp__interior-layout__save_semantic_plan, mcp__interior-layout__load_semantic_plan, mcp__canvas__register_variant
 model: inherit
 ---
 

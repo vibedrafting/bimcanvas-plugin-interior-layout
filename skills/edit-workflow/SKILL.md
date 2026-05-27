@@ -3,7 +3,7 @@ name: edit-workflow
 description: |
   BIMCanvas 编辑任务工作流。
   当用户需要"移动"、"删除"、"旋转"、"调整"等单一修改操作时使用此工作流。
-allowed-tools: Read, Write, Edit, Glob, Grep, mcp__interior-layout__validate_layout, mcp__canvas__request_background_screenshot, AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Grep, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, AskUserQuestion
 ---
 
 # Edit 工作流（小范围设计决策）

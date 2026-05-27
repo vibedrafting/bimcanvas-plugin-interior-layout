@@ -27,7 +27,7 @@
       "mcp__canvas__complete_job",
       "mcp__canvas__list_project_scenes",
       "mcp__canvas__load_scene_artifact",
-      "mcp__interior-layout__validate_layout",
+      "mcp__canvas__validate_layout",
       "mcp__interior-layout__get_zone_boundaries",
       "mcp__interior-layout__save_semantic_plan",
       "mcp__interior-layout__load_semantic_plan",

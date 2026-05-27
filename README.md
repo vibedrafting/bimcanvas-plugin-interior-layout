@@ -14,7 +14,7 @@
 
 - **输入**:`.bcp` 项目(baseline 户型 + 既有 schemes)+ 用户自然语言指令(可附参考图)
 - **输出**:`schemes/{sceneId}/.../modules.json`(家具布置)、`semantic_plan.json`(可施工合同)、`reference_analysis.json`(参考图分析快照)
-- **边界**:只做"放哪/为什么/怎么放";几何 / 碰撞 / 边界由平台基座 `mcp__interior-layout__validate_layout` 统一验证
+- **边界**:只做"放哪/为什么/怎么放";几何 / 碰撞 / 边界由平台基座 `mcp__canvas__validate_layout` 统一验证
 
 ## 安装与启用
 
