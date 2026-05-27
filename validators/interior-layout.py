@@ -459,7 +459,7 @@ def _read_modules_wrapper(abs_path: str) -> Optional[dict]:
     """仅认 wrapper {schemeMetadata, modules}；裸数组抛错（镜像 ModulesReaderService）。"""
     if not os.path.exists(abs_path):
         return None
-    with open(abs_path, "r", encoding="utf-8") as f:
+    with open(abs_path, "r", encoding="utf-8-sig") as f:
         raw = f.read()
     if not raw.strip():
         return {"schemeMetadata": {"summary": ""}, "modules": []}
@@ -708,7 +708,7 @@ def _expected_path(topo: dict, schemes_path: str, zone_id: str) -> str:
 
 def _count_modules_text(abs_path: str) -> str:
     try:
-        with open(abs_path, "r", encoding="utf-8") as f:
+        with open(abs_path, "r", encoding="utf-8-sig") as f:
             token = json.load(f)
         if isinstance(token, dict) and isinstance(token.get("modules"), list):
             return f"{len(token['modules'])} 个模块"
@@ -722,7 +722,7 @@ def _read_json(path: str):
     if not os.path.exists(path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
     except Exception:  # noqa: BLE001
         return None
