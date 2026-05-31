@@ -48,7 +48,8 @@ schemes/{zoneId}/{slug}/[{leaf}/]modules.json   # 该方案的几何（叶子级
 - **战略**：依 `design_evaluation` 五维定 `**设计目标**：…(维度)`，再据房间规则展开布局策略。写方案 `{slug}/DESIGN.md`「## 战略」节。
 - **施工简报**：把战略落成可施工的逐件清单（家具/尺寸来自 module_library、位置/朝向/邻接）。写「## 施工简报」节。
 - **落位**：据简报写 `{slug}/[{leaf}/]modules.json`，每件取库内尺寸、遵 topology/relation 的【必须】规则。
-- **Layer1 机检**：每次 Write modules.json 后调 `validate_layout`（仅验本方案本叶子）；不合格→按诊断修补→重验，直到几何合法（模块数一致、无碰撞、通道达标）。可 `request_background_screenshot` 自检。
+- **Layer1 机检**：每次 Write modules.json 后调 `validate_layout`，不合格→按诊断修补→重验，直到几何合法（模块数一致、无碰撞、通道达标）。可 `request_background_screenshot` 自检。
+  - **【必须·否则机检假绿】调 `validate_layout` 必须传 `variantId=<本候选 slug>`（args 给的 slug）+ `zoneIds=<本设计区/叶子>`。** 不传 variantId 时验的是父 adopted 指针指向的方案（候选生成期 adopted 通常未指向你，会读到空/别的方案 → 0 模块假绿）。验的对象必须是你正在写的这个候选。
 
 ### 3. refine —— 按 judge 的修订指令精修（既定方向内）
 args 给 `rootCause`（strategy|placement）+ `reviseInstruction` + 失分维度：
