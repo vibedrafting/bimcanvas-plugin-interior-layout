@@ -107,10 +107,22 @@ WHY：multi-plan 的设计哲学是"产出几个意图差异显著的候选供�
 
 ### 单分区
 
-- 你直接执行：
-  - 主动设计（`derived`）-> `generate-planning` (free mode) -> `generate-placement`
-   - 参考启发式设计（`reference-informed-derived`）-> 语义上保留该标签，但实现上仍走 `generate-planning` (free mode) -> `generate-placement`
-   - 参考图分析（`reference-analysis`）-> `generate-reference-analysis` -> `generate-planning` (constrained mode) -> `generate-placement`
+#### 场景①·最优方案（无参考 + 单设计区 + 非 multi-plan）→ 调起确定性 workflow
+
+当 generate 语义 = `derived`（无冻结 reference_analysis）、目标是**单个设计区**、且**未命中 multi-plan explore 关键词**时，识别为**场景①**。**不再自己串 `generate-planning`→`generate-placement`**，而是直接调用 **Workflow 工具**把确定性质量引擎跑起来：
+
+- `scriptPath`：plugin 物化根下的 `workflows/interior-layout.workflow.js`（plugin 安装在 `BIMCANVAS_HOME/plugins/interior-layout/`；用系统提示词暴露的 plugin 根绝对路径拼接，得到该 .js 的绝对路径）
+- `args`：`{ "scenario": "single-zone-optimal", "zoneId": "<目标设计区 id>", "n": 3, "refineLevel": 1, "originalUserRequest": "<用户原话>" }`
+- workflow 内部自动完成：GEN 骨架 → 生成 N 候选（各自落位 + Layer1 机检）→ 多维 critic 评审 → judge 择优 → 精修（≤精修档，首轮达标即收，不改方向）→ 翻指针（写父 `{zoneId}/DESIGN.md` 的 `adopted`）。**全程自动、无中途交互**。
+- workflow `return` 后，主控按「收尾职责」做最终验证 + 向用户汇总（胜者 slug、评审维度、是否发生自动适配/自动改图建议）。
+
+> **MVP 已知简化**：①层项目配置（用户喜好载体 `schemes/DESIGN.md`）尚未建，故 critic/judge 暂以纯客观五维评最优；原则8a「最优必含用户喜好维度」留 Step2，非放弃。
+> **边界**：参考图分析（`reference-analysis`）/ 多方案（multi-plan）/ 多分区**不走本分支**，仍按下方既有链路执行（Step2 再逐步 workflow 化）。
+
+#### 其余单分区情形（保留既有链路）
+
+- 参考启发式设计（`reference-informed-derived`）-> 语义上保留该标签，但实现上仍走 `generate-planning` (free mode) -> `generate-placement`
+- 参考图分析（`reference-analysis`）-> `generate-reference-analysis` -> `generate-planning` (constrained mode) -> `generate-placement`
 
 ### 多分区
 

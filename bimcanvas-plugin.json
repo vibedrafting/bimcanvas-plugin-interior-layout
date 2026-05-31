@@ -18,6 +18,7 @@
       "Grep",
       "Task",
       "Skill",
+      "Workflow",
       "AskUserQuestion",
       "mcp__canvas__request_background_screenshot",
       "mcp__canvas__register_variant",
