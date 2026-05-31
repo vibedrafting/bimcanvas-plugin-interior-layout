@@ -77,7 +77,8 @@ log(`评审维度：${dimensions.join('、')}`)
 
 // ── 2. 生成 N 候选（并行，各自落位 + Layer1 机检）──
 phase('候选生成')
-const slugs = Array.from({ length: N }, (_, i) => `cand-${String.fromCharCode(97 + i)}`)
+// 候选默认 _ 前缀隐藏（§3.4）：建目录即隐藏（Web 不主动显示），胜者在采纳步去 _ 转正
+const slugs = Array.from({ length: N }, (_, i) => `_cand-${String.fromCharCode(97 + i)}`)
 await parallel(slugs.map((slug, i) => () =>
   agent(
     `任务=candidate。设计区 ${zoneId}，方案 slug=${slug}（多候选探索第 ${i + 1}/${N} 个，请采取与其它候选明显不同的合理设计方向/锚点）。` +
@@ -133,12 +134,16 @@ for (let round = 0; round < refineLevel; round++) {
   )
 }
 
-// ── 5. 采纳：翻指针（agent 执行，脚本无文件系统权限）──
+// ── 5. 采纳：转正（去 _ 前缀）+ 翻指针（agent 执行，脚本无文件系统权限）──
 phase('采纳')
+const winnerVisible = winner.startsWith('_') ? winner.slice(1) : winner
 await agent(
-  `任务=采纳收尾。Edit schemes/${zoneId}/DESIGN.md 的 frontmatter：设 adopted: ${winner}（无该字段则新增），不动正文其它节；` +
-  `并在正文追加/更新「## 决策日志」一条：场景①自动择优，胜者=${winner}，评审维度=${dimensions.join('、')}，精修档=${refineLevel}。`,
-  { agentType: 'generator', label: `adopt:${winner}`, phase: '采纳' }
+  `任务=adopt（采纳收尾：转正 + 翻指针）。胜者候选=${winner}（_ 前缀隐藏）。\n` +
+  `1) 转正：用 Bash 去 _ 前缀使胜者在 Web 可见：mv "schemes/${zoneId}/${winner}" "schemes/${zoneId}/${winnerVisible}"（目标已存在则停下报错、勿覆盖）。\n` +
+  `2) 翻指针：Edit schemes/${zoneId}/DESIGN.md frontmatter 设 adopted: ${winnerVisible}（无则新增），不动正文其它节。\n` +
+  `3) 决策日志：正文追加/更新「## 决策日志」一条：场景①自动择优，胜者=${winnerVisible}（候选 ${winner} 转正），评审维度=${dimensions.join('、')}，精修档=${refineLevel}。\n` +
+  `落选候选保持 _ 前缀隐藏、不动。`,
+  { agentType: 'generator', label: `adopt:${winnerVisible}`, phase: '采纳' }
 )
 
-return { scenario: 'single-zone-optimal', zoneId, winner, candidates: slugs, dimensions, refineLevel }
+return { scenario: 'single-zone-optimal', zoneId, winner: winnerVisible, hiddenCandidates: slugs.filter(s => s !== winner), dimensions, refineLevel }

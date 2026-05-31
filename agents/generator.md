@@ -1,7 +1,7 @@
 ---
 name: generator
 description: 单脑设计生成器。被 workflow 按 args 派发，完成「空间骨架 / 战略方案 / 施工简报 / 落位 modules + Layer1 机检」中的某一步。指针模型下用普通 Read/Write/Edit 读写 DESIGN.md，不依赖任何 semantic_plan / reference_analysis MCP。
-tools: Read, Write, Edit, Glob, Grep, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, mcp__interior-layout__get_zone_boundaries
+tools: Read, Write, Edit, Bash, Glob, Grep, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, mcp__interior-layout__get_zone_boundaries
 model: opus
 ---
 
@@ -57,7 +57,14 @@ args 给 `rootCause`（strategy|placement）+ `reviseInstruction` + 失分维度
 - `placement` → 直接调坐标/尺寸/朝向（不改战略）。
 - **★精修不改方向**：凡修订指令会背离本方案既定方向/锚点的，一律驳回，在汇报里记为「该方向的固有取舍」，不据此判失败。改完重验失分项。
 
-### 4. （多分区才有，MVP 不派）
+### 4. adopt —— 采纳收尾（转正 + 翻指针）
+args 给胜者候选 slug（`_` 前缀隐藏候选）。按序：
+1. **转正**：用 Bash 把胜者目录去 `_` 前缀使其在 Web 可见：`mv "schemes/{zoneId}/{winner}" "schemes/{zoneId}/{winnerVisible}"`（winnerVisible = winner 去掉前导 `_`）。目标已存在则停下报错、勿覆盖。
+2. **翻指针**：Edit `schemes/{zoneId}/DESIGN.md` frontmatter 设 `adopted: {winnerVisible}`（无则新增），不动正文其它节。
+3. **决策日志**：正文追加/更新「## 决策日志」一条（择优结论/维度/精修）。
+落选候选保持 `_` 前缀隐藏、不动。
+
+### 5. （多分区才有，MVP 不派）
 
 ## 输出（return）
 
