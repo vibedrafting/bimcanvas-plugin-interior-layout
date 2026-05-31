@@ -15,8 +15,10 @@ const zoneId = args && args.zoneId
 if (!zoneId) throw new Error('args.zoneId 必填（场景①：单设计区 id）')
 const N = Math.max(1, (args && args.n) || 3)
 const refineLevel = (args && args.refineLevel != null) ? args.refineLevel : 1
-const dimensions = (args && args.dimensions) || ['动线设计', '空间意图', '功能叙事', '空间节奏', '采光通风']
 const userRequest = (args && args.originalUserRequest) || ''
+// 评审维度不在编排层硬编码（原则5：领域知识不进 workflow）。优先 args 注入；否则在 GEN 骨架后由 agent 读
+// design_evaluation「维度选取参照」+ 房间类型 运行时确定（见下方 dimensions 推导）。
+let dimensions = (args && args.dimensions && args.dimensions.length) ? args.dimensions : null
 
 // ── 结构化输出 schema（critic/judge 出 schema，代码按字段分支）──
 const CRITIC_SCHEMA = {
@@ -61,6 +63,17 @@ await agent(
   `原始诉求：${userRequest}`,
   { agentType: 'generator', label: `skeleton:${zoneId}`, phase: 'GEN骨架' }
 )
+
+// ── 评审维度运行时确定（原则5：维度知识在 design_evaluation 知识层，不在编排层）──
+if (!dimensions) {
+  const dimSel = await agent(
+    `任务=选维度。读项目 references/design_evaluation.md 的「维度选取参照」表与设计区 ${zoneId} 的房间类型，返回该区适用的设计品质评审维度名数组（取自五维框架，2–5 个）。`,
+    { agentType: 'critic', label: 'select-dims', phase: 'GEN骨架', schema: { type: 'object', required: ['dimensions'], properties: { dimensions: { type: 'array', items: { type: 'string' }, minItems: 1 } } } }
+  )
+  dimensions = (dimSel && dimSel.dimensions && dimSel.dimensions.length) ? dimSel.dimensions : null
+}
+if (!dimensions || !dimensions.length) throw new Error('未能确定评审维度（design_evaluation 维度选取失败）')
+log(`评审维度：${dimensions.join('、')}`)
 
 // ── 2. 生成 N 候选（并行，各自落位 + Layer1 机检）──
 phase('候选生成')
