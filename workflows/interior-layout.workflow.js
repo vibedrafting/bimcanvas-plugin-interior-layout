@@ -1,0 +1,131 @@
+export const meta = {
+  name: 'interior-layout-scene1',
+  description: '场景①：无参考·单分区·最优方案 —— GEN骨架→N候选→多维评审→择优→精修→翻指针',
+  phases: [
+    { title: 'GEN骨架', detail: 'generator 写父 DESIGN.md 空间骨架' },
+    { title: '候选生成', detail: 'N 个 generator 并行：战略+简报+落位+Layer1机检' },
+    { title: '选拔评审', detail: '每候选×每维度并行 critic → judge 择优' },
+    { title: '精修', detail: 'critic+judge 循环（≤精修档，首轮达标即收，不改方向）' },
+    { title: '采纳', detail: 'generator Edit 父 DESIGN.md adopted=胜者 + 决策日志' },
+  ],
+}
+
+// ── args（由 L0 主控喂入；与 BIMCANVAS.md 路由层共享契约）──
+const zoneId = args && args.zoneId
+if (!zoneId) throw new Error('args.zoneId 必填（场景①：单设计区 id）')
+const N = Math.max(1, (args && args.n) || 3)
+const refineLevel = (args && args.refineLevel != null) ? args.refineLevel : 1
+const dimensions = (args && args.dimensions) || ['动线设计', '空间意图', '功能叙事', '空间节奏', '采光通风']
+const userRequest = (args && args.originalUserRequest) || ''
+
+// ── 结构化输出 schema（critic/judge 出 schema，代码按字段分支）──
+const CRITIC_SCHEMA = {
+  type: 'object',
+  required: ['dimension', 'score', 'layer1Fail', 'directionRespecting', 'findings'],
+  properties: {
+    dimension: { type: 'string' },
+    score: { type: 'number', description: '0–100；Layer1 不过记不及格' },
+    layer1Fail: { type: 'boolean', description: '工程合规（几何/通行/功能完整）是否有硬伤' },
+    directionRespecting: { type: 'boolean', description: '本维度改进建议整体是否在方案既定方向内' },
+    findings: { type: 'array', items: { type: 'string' }, description: '接地的问题/亮点，带证据' },
+    suggestions: { type: 'array', items: { type: 'string' }, description: '改进建议（注明 strategy/placement 级）' },
+  },
+}
+const JUDGE_SELECT_SCHEMA = {
+  type: 'object',
+  required: ['winner', 'rankedSlugs', 'rationale'],
+  properties: {
+    winner: { type: 'string' },
+    rankedSlugs: { type: 'array', items: { type: 'object', required: ['slug', 'score'], properties: { slug: { type: 'string' }, score: { type: 'number' } } } },
+    rationale: { type: 'string' },
+  },
+}
+const JUDGE_REFINE_SCHEMA = {
+  type: 'object',
+  required: ['passed'],
+  properties: {
+    passed: { type: 'boolean' },
+    rootCause: { type: 'string', enum: ['strategy', 'placement', 'none'] },
+    reviseInstruction: { type: 'string' },
+    failedDimensions: { type: 'array', items: { type: 'string' } },
+  },
+}
+
+const dir = (zoneId, slug) => `schemes/${zoneId}/${slug}`
+
+// ── 1. GEN 骨架（单脑，写父 {zoneId}/DESIGN.md）──
+phase('GEN骨架')
+await agent(
+  `任务=skeleton。为设计区 ${zoneId} 分析当前户型（边界/门窗/通道/禁区，可调 get_zone_boundaries），` +
+  `写 schemes/${zoneId}/DESIGN.md 的「## 空间骨架（客观几何·冻结）」节——只写与设计方向无关的客观几何事实，不放家具、不写战略。` +
+  `原始诉求：${userRequest}`,
+  { agentType: 'generator', label: `skeleton:${zoneId}`, phase: 'GEN骨架' }
+)
+
+// ── 2. 生成 N 候选（并行，各自落位 + Layer1 机检）──
+phase('候选生成')
+const slugs = Array.from({ length: N }, (_, i) => `cand-${String.fromCharCode(97 + i)}`)
+await parallel(slugs.map((slug, i) => () =>
+  agent(
+    `任务=candidate。设计区 ${zoneId}，方案 slug=${slug}（多候选探索第 ${i + 1}/${N} 个，请采取与其它候选明显不同的合理设计方向/锚点）。` +
+    `读时叠加父骨架与项目配置，写 ${dir(zoneId, slug)}/DESIGN.md 的「## 战略」(含 design_evaluation 五维设计目标)与「## 施工简报」节；` +
+    `据简报落位 ${dir(zoneId, slug)}/[{leaf}/]modules.json（家具尺寸取自 module_library），每次写后 validate_layout 直到 Layer1 通过。` +
+    `原始诉求：${userRequest}`,
+    { agentType: 'generator', label: `candidate:${slug}`, phase: '候选生成' }
+  )
+))
+
+// ── 3. 选拔评审（N>1）：每候选 × 每维度并行 critic → judge 择优 ──
+let winner = slugs[0]
+if (N > 1) {
+  phase('选拔评审')
+  const candReviews = await parallel(slugs.map(slug => () =>
+    parallel(dimensions.map(dim => () =>
+      agent(
+        `任务=评审。维度=${dim}。对 ${dir(zoneId, slug)} 打分：读叠 DESIGN.md、Read modules、request_background_screenshot 看真实截图、按 design_evaluation 该维度判据 + module_library 三级规则。`,
+        { agentType: 'critic', label: `critic:${slug}:${dim}`, phase: '选拔评审', schema: CRITIC_SCHEMA }
+      )
+    )).then(reviews => ({ slug, reviews: reviews.filter(Boolean) }))
+  ))
+  const verdict = await agent(
+    `任务=selection。从以下各候选的多维评审中挑最优（任何 layer1Fail=true 的候选先出局，再按多维综合取最高分）：\n${JSON.stringify(candReviews.filter(Boolean), null, 2)}`,
+    { agentType: 'judge', label: 'judge:select', phase: '选拔评审', schema: JUDGE_SELECT_SCHEMA }
+  )
+  if (verdict && verdict.winner) winner = verdict.winner
+  log(`选拔胜者：${winner}${verdict ? '（' + verdict.rationale + '）' : ''}`)
+} else {
+  log('N=1，跳过选拔评审')
+}
+
+// ── 4. 精修 winner（loop ≤ refineLevel，首轮达标即收，不改方向）──
+phase('精修')
+for (let round = 0; round < refineLevel; round++) {
+  const reviews = (await parallel(dimensions.map(dim => () =>
+    agent(
+      `任务=评审。维度=${dim}。对 ${dir(zoneId, winner)} 打分（看真实截图+modules+DESIGN.md）。`,
+      { agentType: 'critic', label: `refine-critic:${winner}:${dim}:r${round + 1}`, phase: '精修', schema: CRITIC_SCHEMA }
+    )
+  ))).filter(Boolean)
+
+  const j = await agent(
+    `任务=refine。判定 ${dir(zoneId, winner)} 是否达标；未达标给 rootCause(strategy|placement)+一句 reviseInstruction+failedDimensions。★精修不改方向：背离既定方向的建议一律驳回。\n${JSON.stringify(reviews, null, 2)}`,
+    { agentType: 'judge', label: `judge:refine:r${round + 1}`, phase: '精修', schema: JUDGE_REFINE_SCHEMA }
+  )
+  if (!j || j.passed) { log(`精修第 ${round + 1} 轮达标即收`); break }
+
+  await agent(
+    `任务=refine。方案 ${dir(zoneId, winner)}。根因=${j.rootCause}；修订指令：${j.reviseInstruction}。只在既定方向内打磨；` +
+    `strategy→Edit 战略/简报节再改 modules，placement→只调坐标/尺寸/朝向；改后重验失分维度：${(j.failedDimensions || []).join('、')}。`,
+    { agentType: 'generator', label: `refine-gen:${winner}:r${round + 1}`, phase: '精修' }
+  )
+}
+
+// ── 5. 采纳：翻指针（agent 执行，脚本无文件系统权限）──
+phase('采纳')
+await agent(
+  `任务=采纳收尾。Edit schemes/${zoneId}/DESIGN.md 的 frontmatter：设 adopted: ${winner}（无该字段则新增），不动正文其它节；` +
+  `并在正文追加/更新「## 决策日志」一条：场景①自动择优，胜者=${winner}，评审维度=${dimensions.join('、')}，精修档=${refineLevel}。`,
+  { agentType: 'generator', label: `adopt:${winner}`, phase: '采纳' }
+)
+
+return { scenario: 'single-zone-optimal', zoneId, winner, candidates: slugs, dimensions, refineLevel }
