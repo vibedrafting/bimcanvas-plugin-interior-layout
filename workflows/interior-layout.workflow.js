@@ -102,7 +102,7 @@ if (N > 1) {
     )).then(reviews => ({ slug, reviews: reviews.filter(Boolean) }))
   ))
   const verdict = await agent(
-    `任务=selection。从以下各候选的多维评审中挑最优（任何 layer1Fail=true 的候选先出局，再按多维综合取最高分）：\n${JSON.stringify(candReviews.filter(Boolean), null, 2)}`,
+    `任务=selection。按 judge.md 的选拔规则，从以下各候选的多维评审中裁决最优：\n${JSON.stringify(candReviews.filter(Boolean), null, 2)}`,
     { agentType: 'judge', label: 'judge:select', phase: '选拔评审', schema: JUDGE_SELECT_SCHEMA }
   )
   if (verdict && verdict.winner) winner = verdict.winner
@@ -122,7 +122,7 @@ for (let round = 0; round < refineLevel; round++) {
   ))).filter(Boolean)
 
   const j = await agent(
-    `任务=refine。判定 ${dir(zoneId, winner)} 是否达标；未达标给 rootCause(strategy|placement)+一句 reviseInstruction+failedDimensions。★精修不改方向：背离既定方向的建议一律驳回。\n${JSON.stringify(reviews, null, 2)}`,
+    `任务=refine。按 judge.md 的精修规则，判定 ${dir(zoneId, winner)} 是否达标并给出修订判决：\n${JSON.stringify(reviews, null, 2)}`,
     { agentType: 'judge', label: `judge:refine:r${round + 1}`, phase: '精修', schema: JUDGE_REFINE_SCHEMA }
   )
   if (!j || j.passed) { log(`精修第 ${round + 1} 轮达标即收`); break }
