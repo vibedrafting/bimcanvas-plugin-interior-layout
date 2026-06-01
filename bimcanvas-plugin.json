@@ -21,22 +21,14 @@
       "Workflow",
       "AskUserQuestion",
       "mcp__canvas__request_background_screenshot",
-      "mcp__canvas__register_variant",
-      "mcp__canvas__list_variants",
       "mcp__canvas__analyze_image",
       "mcp__canvas__create_job",
       "mcp__canvas__complete_job",
-      "mcp__canvas__list_project_scenes",
-      "mcp__canvas__load_scene_artifact",
+      "mcp__canvas__load_artifact",
       "mcp__canvas__validate_layout",
       "mcp__interior-layout__get_zone_boundaries"
     ],
-    "deny": [
-      "mcp__interior-layout__save_semantic_plan",
-      "mcp__interior-layout__load_semantic_plan",
-      "mcp__interior-layout__load_reference_analysis",
-      "mcp__interior-layout__save_reference_analysis"
-    ]
+    "deny": []
   },
   "agents": { "allow": [], "deny": [] },
 
