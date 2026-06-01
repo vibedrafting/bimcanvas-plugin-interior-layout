@@ -47,9 +47,18 @@ schemes/{zoneId}/{slug}/[{leaf}/]modules.json   # 该方案的几何（叶子级
 读叠父骨架（+项目配置/参考约束）后，在 args 给的方向/锚点（`direction`/`variantAnchorSeed`，可空）内：
 - **战略**：依 `design_evaluation` 五维定 `**设计目标**：…(维度)`，再据房间规则展开布局策略。写方案 `{slug}/DESIGN.md`「## 战略」节。
 - **施工简报**：把战略落成可施工的逐件清单（家具/尺寸来自 module_library、位置/朝向/邻接）。写「## 施工简报」节。
-- **落位**：据简报写 `{slug}/[{leaf}/]modules.json`，每件取库内尺寸、遵 topology/relation 的【必须】规则。
+- **落位**：据简报写 `{slug}/[{leaf}/]modules.json`。每件家具尺寸取自 module_library（不编造），遵 topology/relation 的【必须】规则。**几何格式必须为 canonical（Server / Web / validate 唯一认这一种），由你直接算出顶点坐标填入——`validate_layout` 只做编译校验，不替你发现/补算几何**：
+  - 文件形态 wrapper：`{ "schemeMetadata": {"summary": ""}, "modules": [ ... ] }`，保留外层 `schemeMetadata`（误删会让 Reader 报错 / Web tooltip 丢失）。
+  - 每个 module 必备字段：
+    - `moduleId`（库内类型 id）、`moduleName`（与 module_library 一致）；
+    - `bounds`：矩形 4 顶点多边形 `[[x,y],[x,y],[x,y],[x,y]]`，顺序 左下→右下→右上→左上，单位 mm。**由"中心 / 墙面归属 + 库内尺寸 width×depth + 朝向"自己算出实际占位顶点**（朝向偏转时顶点随之旋转）。
+    - `facing`：对象 `{ "value": [x,y] | null, "semantic": string|null }`。推荐写 `semantic`（仅 8 个标准方向词 north/south/east/west/northeast/northwest/southeast/southwest）、`value` 留 `null`；validate 会据 semantic 归一出 value。
+    - `items`：无子项写 `[]`。
+  - **禁止**自创字段：`position` / `size` / `facing` 写成字符串 / `wallId` / `notes`——这些不映射到 Server 的 Module 模型，会被反序列化丢弃、validate 读 0、Web 渲染不出。
+  - 写入模板（单件示意）：`{ "moduleId": "mod_bed_001", "moduleName": "双人床", "bounds": [[9100,1750],[11100,1750],[11100,3750],[9100,3750]], "facing": {"value": null, "semantic": "south"}, "items": [] }`。可视真样参考用户手动布置的 `schemes/{某区}/modules.json`。
 - **Layer1 机检**：每次 Write modules.json 后调 `validate_layout`，不合格→按诊断修补→重验，直到几何合法（模块数一致、无碰撞、通道达标）。可 `request_background_screenshot` 自检。
   - **【必须·否则机检假绿】调 `validate_layout` 必须传 `variantId=<本候选 slug>`（args 给的 slug）+ `zoneIds=<本设计区/叶子>`。** 不传 variantId 时验的是父 adopted 指针指向的方案（候选生成期 adopted 通常未指向你，会读到空/别的方案 → 0 模块假绿）。验的对象必须是你正在写的这个候选。
+  - **【必须·0 模块=路径/格式错，禁止报成功】若本轮写入了模块但 validate 报「0 模块」，绝不是验证通过：要么叶子路径写错、要么几何非 canonical（缺 `bounds` / 用了 `position`+`size`）。必须重核叶子路径与 bounds/facing 格式后重写，禁止改用"手动复核"蒙混汇报成功。**
 
 ### 3. refine —— 按 judge 的修订指令精修（既定方向内）
 args 给 `rootCause`（strategy|placement）+ `reviseInstruction` + 失分维度：

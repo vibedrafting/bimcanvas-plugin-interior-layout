@@ -50,6 +50,9 @@ E_INVALID_BOUNDS = "E012_INVALID_BOUNDS"
 E_INVALID_MODULE_FILE_PATH = "E013_INVALID_MODULE_FILE_PATH"
 E_DUPLICATE_ZONE_MODULE_FILES = "E014_DUPLICATE_ZONE_MODULE_FILES"
 
+# 指针模型：方案合同文件名（用于 adopted 指针解析 + slug 作用域识别）
+DESIGN_DOC = "DESIGN.md"
+
 # ZoneType 兼容：on-disk 数据用 camelCase 字符串("room"/"designable"/"exclusion")；
 # C# Newtonsoft 读 enum 时字符串/整数都能 parse，Python 直读文件须显式兼容两种表示。
 _ZONE_TYPE_ALIASES = {
@@ -605,6 +608,64 @@ def _canonical_path(schemes_path: str, segments: list) -> str:
     return os.path.join(schemes_path, *segments, "modules.json")
 
 
+def _slug_path(schemes_path: str, zone_id: str, segments: list, slug: str) -> str:
+    """指针模型：slug 直接做设计区下一级（无 variants/ 段），镜像 C# SwapToVariant / BuildLeafEntry。
+    顶层叶子（dz == leaf）→ schemes/{dz}/{slug}/modules.json
+    嵌套叶子（dz != leaf）→ schemes/{dz}/{slug}/{leaf}/modules.json（中间容器一律压平到叶子）。
+    """
+    design_zone_id = segments[0] if segments else zone_id
+    if design_zone_id == zone_id:
+        return os.path.join(schemes_path, design_zone_id, slug, "modules.json")
+    return os.path.join(schemes_path, design_zone_id, slug, zone_id, "modules.json")
+
+
+def _read_adopted_slug(schemes_path: str, design_zone_id: str) -> Optional[str]:
+    """读 schemes/{dz}/DESIGN.md frontmatter 的 adopted 值（镜像 C# SchemeDesignDocService.ResolveAdoptedSlug）。
+    无 DESIGN.md / 无 frontmatter / 无 adopted → None（存量项目回落 legacy canonical，零回归）。
+    只取单字段，按行解析首个 --- ... --- frontmatter 块即可，不引 yaml 依赖。"""
+    design_md = os.path.join(schemes_path, design_zone_id, DESIGN_DOC)
+    if not os.path.exists(design_md):
+        return None
+    try:
+        with open(design_md, "r", encoding="utf-8-sig") as f:
+            text = f.read()
+    except OSError:
+        return None
+    lines = text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.strip() == "---":
+            start = i
+            break
+    if start is None:
+        return None
+    for ln in lines[start + 1:]:
+        if ln.strip() == "---":
+            break
+        s = ln.strip()
+        if s.startswith("adopted:"):
+            val = s[len("adopted:"):].strip().strip('"').strip("'")
+            return val or None
+    return None
+
+
+def _resolve_leaf_path(schemes_path: str, zone_id: str, segments: list,
+                       variant_id: Optional[str]) -> str:
+    """叶子 modules.json 路径单一解析器（收敛 variant / adopted / legacy 三种）：
+    - 显式 variant_id（候选 validate、场景⑦读特定方案）→ schemes/{dz}/{variant_id}/[{leaf}/]modules.json
+    - 无 variant_id 但父 DESIGN.md 有 adopted:{slug} → schemes/{dz}/{slug}/[{leaf}/]modules.json
+    - 无 adopted（存量未迁移）→ legacy canonical schemes/{*segments}/modules.json（零回归）
+    镜像 C# ModuleFileTopology.SwapToVariant + BuildLeafEntry(ResolveAdoptedCached)。
+    """
+    if variant_id:
+        return _slug_path(schemes_path, zone_id, segments, variant_id)
+    design_zone_id = segments[0] if segments else zone_id
+    adopted = _read_adopted_slug(schemes_path, design_zone_id)
+    if adopted:
+        return _slug_path(schemes_path, zone_id, segments, adopted)
+    return _canonical_path(schemes_path, segments)
+
+
 def _canonical_files(topo: dict, schemes_path: str, target_raw: Optional[set],
                      variant_id: Optional[str]) -> list[tuple[str, str]]:
     if not topo["has_topology"]:
@@ -618,31 +679,13 @@ def _canonical_files(topo: dict, schemes_path: str, target_raw: Optional[set],
     out: list[tuple[str, str]] = []
     seen = set()
     for zid, segments in entries:
-        if variant_id:
-            path = _swap_to_variant(schemes_path, zid, segments, variant_id)
-        else:
-            path = _canonical_path(schemes_path, segments)
+        path = _resolve_leaf_path(schemes_path, zid, segments, variant_id)
         if os.path.exists(path):
             key = os.path.normcase(os.path.abspath(path))
             if key not in seen:
                 seen.add(key)
                 out.append((path, zid))
     return out
-
-
-def _swap_to_variant(schemes_path: str, zone_id: str, segments: list, variant_id: str) -> str:
-    """镜像 ModuleFileTopology.SwapToVariant（新协议优先，旧 sibling 兜底）。"""
-    design_zone_id = segments[0] if segments else zone_id
-    is_top_level_leaf = (design_zone_id == zone_id)
-    if is_top_level_leaf:
-        new_path = os.path.join(schemes_path, design_zone_id, "variants", variant_id, "modules.json")
-    else:
-        new_path = os.path.join(schemes_path, design_zone_id, "variants", variant_id, zone_id, "modules.json")
-    if os.path.exists(new_path):
-        return new_path
-    # legacy sibling：schemes/{segments}/modules-{variantId}.json
-    canonical_dir = os.path.dirname(_canonical_path(schemes_path, segments))
-    return os.path.join(canonical_dir, f"modules-{variant_id}.json")
 
 
 def _legacy_files(schemes_path: str) -> list[tuple[str, str]]:
@@ -665,13 +708,27 @@ def _legacy_files(schemes_path: str) -> list[tuple[str, str]]:
     return out
 
 
+def _is_slug_scoped_in_pointer_zone(schemes_path: str, rel: str) -> bool:
+    """镜像 C# IsSchemeSlugScopedInPointerZone：schemes/{dz}/{slug}/[…/]modules.json
+    （rel 段数≥3 且 dz 有 DESIGN.md）= 指针管理的方案作用域文件，跳过 E013/E014 校验，
+    避免候选 / adopted 目录被误报为非法 canonical 路径。
+    段数<3（如 {dz}/modules.json legacy-spot）照常校验（抓未迁移残留）。"""
+    segments = [s for s in rel.split("/") if s]
+    if len(segments) < 3:
+        return False
+    design_zone_id = segments[0]
+    return os.path.exists(os.path.join(schemes_path, design_zone_id, DESIGN_DOC))
+
+
 # ── 路径问题 E013/E014（镜像 ModuleFileTopology.GetPathIssues）──
 def _path_issues(topo: dict, schemes_path: str, target_raw: Optional[set]) -> list[dict]:
     if not topo["has_topology"] or not os.path.isdir(schemes_path):
         return []
     target = _expand_targets(topo, target_raw)
     canonical = topo["canonical"]
-    canonical_abs = {zid: os.path.normcase(os.path.abspath(_canonical_path(schemes_path, seg)))
+    # canonical 期望路径同样经 adopted 重定向（与 _resolve_leaf_path 同源），
+    # 使指针区的 legacy-spot 残留 schemes/{dz}/modules.json 能被正确标为 E013（镜像 C#）。
+    canonical_abs = {zid: os.path.normcase(os.path.abspath(_resolve_leaf_path(schemes_path, zid, seg, None)))
                      for zid, seg in canonical.items()}
 
     records: list[tuple[str, str, str]] = []  # (zoneId, absPath, relPath)
@@ -682,6 +739,8 @@ def _path_issues(topo: dict, schemes_path: str, target_raw: Optional[set]) -> li
         if "/variants/" in abs_path.replace("\\", "/").lower():
             continue
         rel = os.path.relpath(abs_path, schemes_path).replace("\\", "/")
+        if _is_slug_scoped_in_pointer_zone(schemes_path, rel):
+            continue
         zone_id = "legacy" if rel == "modules.json" else os.path.basename(os.path.dirname(abs_path))
         if target is not None and zone_id not in target:
             continue
