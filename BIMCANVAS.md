@@ -288,7 +288,7 @@ SubAgent 完成后：
 
 ## 收尾职责
 
-layout-agent 完成后，你负责：
+**无论经场景① workflow `return`（单分区）、还是多分区 layout-agent 完成后**，你都负责（两条路径都适用，单分区也不得跳过功能完整性复核）：
 
 1. 调用 `validate_layout()` 做全局几何验证
 2. **【必须】**基于最终 `modules.json` 与 `zones.json` 做功能完整性复核：每个 zone 的 `tags` 都必须有对应模块，或在最终汇报中明确说明为何缺失
