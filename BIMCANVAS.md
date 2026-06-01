@@ -22,6 +22,37 @@
 
 ---
 
+## 指针模型 · 方案与 modules 读契约（必须遵守，否则读错路径/404）
+
+> 本平台已是**纯指针式平级模型**。**没有 `variants/` 子层、没有固定 canonical `schemes/{zoneId}/modules.json`**。旧的「变体在 `schemes/{zoneId}/variants/{slug}/`、采纳后落 canonical」模型**已废弃**——不要再假设这些旧路径，否则读不到数据（如 `load_scene_artifact(modules, path="rz_3")` 误以为读 `schemes/rz_3/modules.json`）。
+
+**文件布局（真理）**：
+
+```
+schemes/{zoneId}/DESIGN.md              # 分区父：frontmatter adopted:{slug} = 当前生效方案指针
+schemes/{zoneId}/{slug}/DESIGN.md       # 每个方案一份（平级；slug 直接做 {zoneId} 下一级，无 variants/）
+schemes/{zoneId}/{slug}/[{leaf}/]modules.json   # 该方案的几何（叶子级；有 subZones 时按叶子分多份）
+```
+
+- 候选 slug 以 **`_` 前缀 = 隐藏**（如 `_cand-a`，Web 不主动显示、可回溯）；无前缀 = 显示。
+- **当前生效 = 父 `adopted` 指针指向的那个 slug**；采纳 = 翻指针（写父 `adopted`），零复制 / 零删除 / 零降级 / 可逆。
+
+**怎么发现一个设计区有哪些方案**：调 `list_variants({designZoneId})` → 返回每个 `{slug, state, summary}`，`state` ∈ `adopted`(当前生效) / `variant`(可见候选) / `hidden`(`_` 前缀隐藏)。**slug 就是 `{zoneId}` 下一级目录名，直接拼路径，不要加 `variants/`。**
+
+**怎么读 modules（`mcp__canvas__load_scene_artifact`，artifactKind=`modules`）**：
+
+| 要读什么 | 正确调用 | 返回 |
+|---------|---------|------|
+| 某设计区**当前生效(adopted)**方案 | `path="{zoneId}"`（裸设计区，Server 经拓扑自动解析 adopted 指针） | `{files:[{relativePath, content}]}`（relativePath 即解析后真实 slug 路径，单叶 1 份、容器多叶多份） |
+| **所有**设计区的 adopted（聚合） | `path` 留空 | 同上，全屋 adopted modules |
+| **某个具体方案 / 隐藏候选**（如 `_cand-a` / `cand-b`） | `path="{zoneId}/{slug}"`（显式带 slug，如 `rz_3/_cand-a`） | 该方案 modules 原文 |
+
+- **【禁止】**`path="{zoneId}/variants/{slug}"`、`path` 指望读固定 canonical `schemes/{zoneId}/modules.json`——旧模型路径，不存在。
+- 隐藏候选**不会**被 adopted/聚合读返回，必须显式 `path="{zoneId}/{slug}"`。
+- 读到 `404 artifact_not_found` 且 path 是裸 zoneId → 该区可能尚未采纳任何方案；若要逐个查候选，先 `list_variants` 拿 slug，再按 `path="{zoneId}/{slug}"` 逐个读。
+
+---
+
 ## 业务路由扩展
 
 基座只承担 chat / 引导安装 plugin；以下是 interior-layout 提供的**全部业务路由**（含原 v3.5 时代由 core-base 兜底的 query / edit，现已收归本 plugin 维护）：
