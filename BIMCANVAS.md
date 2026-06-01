@@ -34,6 +34,7 @@ schemes/{zoneId}/{slug}/DESIGN.md       # 每个方案一份（平级；slug 直
 schemes/{zoneId}/{slug}/[{leaf}/]modules.json   # 该方案的几何（叶子级；有 subZones 时按叶子分多份）
 ```
 
+- **【最易踩·必读】`subZones: null`（单叶设计区）绝不等于 modules 在 `schemes/{zoneId}/modules.json`**。指针模型下 **slug 层永远存在**——即使设计区只有一个叶子、`subZones:null`，它的 modules 也在 `schemes/{zoneId}/{slug}/modules.json`（如 `schemes/rz_3/cand-c/modules.json`）。`schemes/{zoneId}/modules.json` 是**旧 canonical、已不存在**。看到 `subZones:null` 时**不要**凭"叶子区→modules 在区目录根"的旧直觉去 Read `schemes/{zoneId}/modules.json`，那会落空；先 `list_variants` 拿 slug，再读 `schemes/{zoneId}/{slug}/modules.json`。
 - 候选 slug 以 **`_` 前缀 = 隐藏**（如 `_cand-a`，Web 不主动显示、可回溯）；无前缀 = 显示。
 - **当前生效 = 父 `adopted` 指针指向的那个 slug**；采纳 = 翻指针（写父 `adopted`），零复制 / 零删除 / 零降级 / 可逆。
 
