@@ -2,7 +2,7 @@ export const meta = {
   name: 'interior-layout-scene1',
   description: '场景①：无参考·单分区·最优方案 —— GEN骨架→N候选→多维评审→择优→精修→翻指针',
   phases: [
-    { title: 'GEN骨架', detail: 'generator 写父 DESIGN.md 空间骨架' },
+    { title: 'GEN骨架', detail: 'generator 写父 DESIGN.md 空间骨架 + 分区(subZones/语义功能带/功能分歧自动代决)' },
     { title: '候选生成', detail: 'N 个 generator 并行：战略+简报+落位+Layer1机检' },
     { title: '选拔评审', detail: '每候选×每维度并行 critic → judge 择优' },
     { title: '精修', detail: 'critic+judge 循环（≤精修档，首轮达标即收，不改方向）' },
@@ -59,8 +59,10 @@ const dir = (zoneId, slug) => `schemes/${zoneId}/${slug}`
 phase('GEN骨架')
 await agent(
   `任务=skeleton。为设计区 ${zoneId} 分析当前户型（边界/门窗/通道/禁区，可调 get_zone_boundaries），` +
-  `写 schemes/${zoneId}/DESIGN.md 的「## 空间骨架（客观几何·冻结）」节——只写与设计方向无关的客观几何事实，不放家具、不写战略。` +
-  `原始诉求：${userRequest}`,
+  `按 generator.md skeleton 规程产出**与设计方向无关、所有候选共享**的客观事实层：` +
+  `① 写 schemes/${zoneId}/DESIGN.md 的「## 空间骨架（客观几何·冻结）」节；` +
+  `② 分区(zoning)：空间预演判定是否需物理分割→需则写 schemes/zones.json 的 subZones 并对新子 zone 取 passage→无论是否分割都输出语义功能带→功能方案分歧以 [自动代决] 显式记录。` +
+  `不放家具、不写战略（战略/简报/落位是 candidate 步的事）。原始诉求：${userRequest}`,
   { agentType: 'generator', label: `skeleton:${zoneId}`, phase: 'GEN骨架' }
 )
 
