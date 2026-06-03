@@ -195,57 +195,6 @@ def build_zones_skeleton(leaf_ids: list[str]) -> str:
     return json.dumps(zones, ensure_ascii=False, indent=2)
 
 
-def _split_frontmatter_and_body(text: str) -> tuple[str | None, str]:
-    """复刻 C# SchemeDesignDocService.SplitFrontmatterAndBody。
-
-    返回 (frontmatter|None, body)。首行须为 `---` 且向下能找到闭合 `---`,
-    否则视为无 frontmatter、body 为原始文本(不归一化,与 C# 早退分支对称)。
-    """
-    body = text or ""
-    if not text:
-        return None, body
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    lines = normalized.split("\n")
-    if not lines or lines[0].strip() != "---":
-        return None, body
-    close = -1
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            close = i
-            break
-    if close < 0:
-        return None, body
-    frontmatter = "\n".join(lines[1:close])
-    body = "\n".join(lines[close + 1:])
-    return frontmatter, body
-
-
-def write_adopted_frontmatter(existing_text: str, slug: str) -> str:
-    """复刻 C# SchemeDesignDocService.WriteAdoptedSlug 的字节级输出(watch W1)。
-
-    只定位替换 frontmatter 中的 `adopted:` 行(大小写不敏感),其余行(含空行/他字段)
-    与正文原样保留;无 adopted 行则首行插入。空文件 → `---\\nadopted: {slug}\\n---\\n`。
-    输出须与 C# 字节级一致,否则 Server ReadAdoptedSlug 的 YAML 反序列化读不到指针。
-    """
-    frontmatter, body = _split_frontmatter_and_body(existing_text or "")
-    frontmatter_lines: list[str] = []
-    adopted_written = False
-    if frontmatter:
-        for raw_line in frontmatter.split("\n"):
-            line = raw_line.rstrip("\r")
-            if line.lstrip().lower().startswith("adopted:"):
-                frontmatter_lines.append(f"adopted: {slug}")
-                adopted_written = True
-            else:
-                frontmatter_lines.append(line)
-    if not adopted_written:
-        frontmatter_lines.insert(0, f"adopted: {slug}")
-
-    parts = ["---\n"]
-    for line in frontmatter_lines:
-        parts.append(line + "\n")
-    parts.append("---\n")
-    if body:
-        parts.append("\n")
-        parts.append(body.lstrip("\n"))
-    return "".join(parts)
+# adopt 写盘已收敛到 C# POST /api/scheme/variant/adopt(唯一真理源);
+# 原 write_adopted_frontmatter / _split_frontmatter_and_body(字节级镜像 C# frontmatter)
+# 随之删除——Python 不再自写 adopted 指针,无需维护字节级对齐。

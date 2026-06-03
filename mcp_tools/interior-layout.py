@@ -67,14 +67,6 @@ def _write_text(path: str, content: str) -> None:
         f.write(content)
 
 
-def _atomic_write_text(path: str, content: str) -> None:
-    """原子写:写 .tmp 后 os.replace(跨平台原子覆盖,对齐 C# tmp+File.Move(overwrite))。"""
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="") as f:
-        f.write(content)
-    os.replace(tmp, path)
-
-
 def register(builder: McpServerBuilder) -> None:
     """interior-layout plugin 注册入口。"""
     ctx = builder.context
@@ -236,7 +228,10 @@ def register(builder: McpServerBuilder) -> None:
         },
     )
     async def adopt_variant(args: dict[str, Any]) -> dict[str, Any]:
-        """翻指针:胜者转正 + 父 DESIGN.md 写 adopted(直接文件系统,根 = ctx.project_path)。"""
+        """采纳收口:转正(_ 去前缀)+ 翻父 DESIGN.md adopted 指针,统一由 C#
+        POST /api/scheme/variant/adopt 唯一落盘——含 SignalR 广播(前端自动 reload)、
+        空方案非空校验、R3 写 gate、designZone 并发锁。本 MCP 仅只读解析磁盘真实目录名后透传,
+        不再自写盘(故无需 Python 字节级对齐 C# frontmatter)。"""
         project_path = getattr(ctx, "project_path", None)
         if not project_path:
             return _error("当前无加载项目(project_path 为空),无法采纳")
@@ -247,34 +242,35 @@ def register(builder: McpServerBuilder) -> None:
         if not biz.is_safe_slug(promoted):
             return _error(f"winnerSlug 非法 '{winner}':去前缀后须 [a-z0-9-]、长度 1..30")
 
+        # 只读解析磁盘真实目录名:场景①候选默认隐藏 _{slug}。C# 端点按传入名定位目录、
+        # 不会自动改试 _ 前缀(先按名找、后处理转正),故须传真实存在的名字;_ 去前缀转正 +
+        # 翻指针仍由 C# 做,这里只 isdir 探测、不写盘。
         dz_root = os.path.join(project_path, "schemes", design_zone_id)
-        if not os.path.isdir(dz_root):
-            return _error(f"设计区不存在: {design_zone_id}")
-
-        hidden_dir = os.path.join(dz_root, f"_{promoted}")
-        visible_dir = os.path.join(dz_root, promoted)
-        if os.path.isdir(hidden_dir):
-            # 转正:目标存在则报错不覆盖(契约);否则原子 rename
-            if os.path.exists(visible_dir):
-                return _error(f"转正目标已存在,不覆盖: {promoted}")
-            os.rename(hidden_dir, visible_dir)
-        elif os.path.isdir(visible_dir):
-            pass  # 已可见,无需转正
+        if os.path.isdir(os.path.join(dz_root, f"_{promoted}")):
+            variant_slug = f"_{promoted}"
+        elif os.path.isdir(os.path.join(dz_root, promoted)):
+            variant_slug = promoted
         else:
             return _error(f"方案目录不存在: {winner}")
 
-        # 翻指针:父设计区 DESIGN.md frontmatter 写 adopted(字节级对齐 C# SchemeDesignDocService)
-        parent_md = os.path.join(dz_root, "DESIGN.md")
-        existing = ""
-        if os.path.exists(parent_md):
-            with open(parent_md, "r", encoding="utf-8") as f:
-                existing = f.read()
-        _atomic_write_text(parent_md, biz.write_adopted_frontmatter(existing, promoted))
-
-        return _text(
-            json.dumps(
-                {"adopted": promoted, "designZoneId": design_zone_id},
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        # 照抄 get_zone_boundaries 的 Server 调用范式(MCP 调 Server,Server 为唯一写盘真理源)。
+        try:
+            async with ctx.session.post(
+                f"{ctx.server_url}/api/scheme/variant/adopt",
+                json={"designZoneId": design_zone_id, "variantSlug": variant_slug},
+            ) as resp:
+                if resp.status != 200:
+                    try:
+                        error_data = await resp.json()
+                        error_msg = (
+                            error_data.get("error")
+                            or error_data.get("message")
+                            or f"HTTP {resp.status}"
+                        )
+                    except Exception:
+                        error_msg = await resp.text()
+                    return _error(f"采纳失败: {error_msg}")
+                data = await resp.json()
+                return _text(json.dumps(data, ensure_ascii=False, indent=2))
+        except aiohttp.ClientError as e:
+            return _error(f"无法连接 Server: {e}")
