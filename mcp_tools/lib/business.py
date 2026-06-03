@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 
@@ -126,3 +128,124 @@ def format_zone_boundaries(data: list[dict[str, Any]]) -> str:
             all_zone_lines.append("")
 
     return "\n".join(all_zone_lines)
+
+
+# ============================================================
+# 变体目录骨架 / 指针翻转纯函数(register_variant / adopt_variant)
+#
+# 纪律:本模块全是纯函数(无 ctx / HTTP / 磁盘 I/O);文件落盘 / 目录 rename
+# 等副作用一律由 interior-layout.py 的 tool handler 执行。
+# ============================================================
+
+# slug 字符集:[a-z0-9-] 且 1..30(对齐蓝图 §5.3 + 平台 EnsureSafeVariantId)
+_SLUG_RE = re.compile(r"^[a-z0-9-]{1,30}$")
+
+
+def is_safe_slug(slug: str) -> bool:
+    """校验 slug 字符集:仅 [a-z0-9-]、长度 1..30。"""
+    return bool(slug) and _SLUG_RE.match(slug) is not None
+
+
+def build_variant_design_md(summary: str) -> str:
+    """变体级 DESIGN.md 正文骨架(裁决 B:无 frontmatter)。
+
+    依总纲领 §3.4——方案级 {zoneId}/{slug}/DESIGN.md 方向/锚点/战略/简报全在正文,
+    不写任何 frontmatter;summary 单一来源是 modules.json 的 schemeMetadata.summary,
+    此处仅把它作为正文一句话陈述,不另立 frontmatter 真理源。
+    """
+    intent = summary.strip() if summary else ""
+    lines = ["# 方案设计说明", ""]
+    if intent:
+        lines.append(intent)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def build_modules_skeleton(summary: str) -> str:
+    """叶子 modules.json 骨架:{schemeMetadata:{summary}, modules:[]}。
+
+    键名 camelCase,对齐 C# ModulesWrapper 落盘形态。
+    """
+    return json.dumps(
+        {"schemeMetadata": {"summary": summary}, "modules": []},
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def build_zones_skeleton(leaf_ids: list[str]) -> str:
+    """per-scheme zones.json 占位骨架(裁决 A1 + 扁平叶子数组)。
+
+    顶层是扁平 JSON 数组 [{id,...},...](非 subZones 包裹),对齐 P1
+    ModuleFileTopologyService.RegisterSchemeLeaves 的 ReadJson<List<Zone>> + foreach。
+    rawBoundary:null 占位,几何由 Step4② 方案落地 Agent 后续 Edit 补齐
+    (EnumerateSchemeLeaves 只读 id 枚举叶子、不需几何;几何到 validate 才用)。
+    """
+    zones = [
+        {
+            "id": leaf_id,
+            "name": "",
+            "type": "designable",
+            "rawBoundary": None,
+            "tags": [],
+            "optionalTags": [],
+        }
+        for leaf_id in leaf_ids
+    ]
+    return json.dumps(zones, ensure_ascii=False, indent=2)
+
+
+def _split_frontmatter_and_body(text: str) -> tuple[str | None, str]:
+    """复刻 C# SchemeDesignDocService.SplitFrontmatterAndBody。
+
+    返回 (frontmatter|None, body)。首行须为 `---` 且向下能找到闭合 `---`,
+    否则视为无 frontmatter、body 为原始文本(不归一化,与 C# 早退分支对称)。
+    """
+    body = text or ""
+    if not text:
+        return None, body
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None, body
+    close = -1
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            close = i
+            break
+    if close < 0:
+        return None, body
+    frontmatter = "\n".join(lines[1:close])
+    body = "\n".join(lines[close + 1:])
+    return frontmatter, body
+
+
+def write_adopted_frontmatter(existing_text: str, slug: str) -> str:
+    """复刻 C# SchemeDesignDocService.WriteAdoptedSlug 的字节级输出(watch W1)。
+
+    只定位替换 frontmatter 中的 `adopted:` 行(大小写不敏感),其余行(含空行/他字段)
+    与正文原样保留;无 adopted 行则首行插入。空文件 → `---\\nadopted: {slug}\\n---\\n`。
+    输出须与 C# 字节级一致,否则 Server ReadAdoptedSlug 的 YAML 反序列化读不到指针。
+    """
+    frontmatter, body = _split_frontmatter_and_body(existing_text or "")
+    frontmatter_lines: list[str] = []
+    adopted_written = False
+    if frontmatter:
+        for raw_line in frontmatter.split("\n"):
+            line = raw_line.rstrip("\r")
+            if line.lstrip().lower().startswith("adopted:"):
+                frontmatter_lines.append(f"adopted: {slug}")
+                adopted_written = True
+            else:
+                frontmatter_lines.append(line)
+    if not adopted_written:
+        frontmatter_lines.insert(0, f"adopted: {slug}")
+
+    parts = ["---\n"]
+    for line in frontmatter_lines:
+        parts.append(line + "\n")
+    parts.append("---\n")
+    if body:
+        parts.append("\n")
+        parts.append(body.lstrip("\n"))
+    return "".join(parts)

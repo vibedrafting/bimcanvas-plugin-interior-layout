@@ -26,7 +26,9 @@
       "mcp__canvas__complete_job",
       "mcp__canvas__load_artifact",
       "mcp__canvas__validate_layout",
-      "mcp__interior-layout__get_zone_boundaries"
+      "mcp__interior-layout__get_zone_boundaries",
+      "mcp__interior-layout__register_variant",
+      "mcp__interior-layout__adopt_variant"
     ],
     "deny": []
   },
