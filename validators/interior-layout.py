@@ -4,8 +4,15 @@
 （E001–E014）+ facing normalize 从主仓 C#（BIMCanvas.Core / BIMCanvas.Server）下沉到本脚本。
 平台只提供几何原语（bimcanvas_plugin_sdk.geometry，shapely）、调用机制、稳定端点与回写。
 
+P3 · §2.8 整合（2026-06-03）：拓扑解析**只留 C# 一份**（ModuleFileTopologyService）。
+本验证器**删掉整个自建拓扑层**，降级为纯几何/语义检查器，改为消费 C# 经 stdin 注入的"已解析视图"：
+  - request["resolvedLeaves"]  = [{leafZoneId, modulesPath(相对schemes,posix), designZoneId, isContainer}]
+      → 告诉本脚本"哪个文件 = 哪个叶子 zoneId"，不再自建拓扑 / 不再 flatten / 不再读 DESIGN.md。
+  - request["zoneGeometry"]     = {designZones:[...], exclusionZones:[...]}（仅 validate 注入，几何唯一来源）。
+  - request["pathIssues"]       = [{code, zoneId, actualPath, expectedPath, moduleCount}]（E013/E014，C# 已判好）。
+
 入口：`run(request) -> result`
-  request = {mode: "normalize"|"validate", projectPath, zoneIds?: [..], variantId?: str}
+  request = {mode, projectPath, zoneIds?, variantId?, resolvedLeaves, zoneGeometry?, pathIssues}
   result  = {report: {...冻结报文...}, writeback: [{path, wrapper}, ...]}
   - normalize → report 为 ModuleNormalizationReport 形态
   - validate  → report 为 SchemeValidationReport 形态（内部先 normalize 回写、再校验）
@@ -22,7 +29,7 @@ import json
 import math
 import os
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from bimcanvas_plugin_sdk import geometry
 
@@ -35,7 +42,7 @@ ERROR_THRESHOLD_MM = 10.0      # SchemeValidator.ErrorThresholdMm（穿透深度
 BOUNDS_TOL_MM = 0.001          # ValidationController.BoundsCoordinateToleranceMm
 WITHIN_TOLERANCE_MM = 10.0     # CollisionDetector.IsWithinTolerant 默认容差
 
-# DiagnosticCodes
+# DiagnosticCodes（与 C# BIMCanvas.Core.Validation.DiagnosticCodes 逐字一致）
 E_OUT_OF_BOUNDS = "E001_OUT_OF_BOUNDS"
 E_WALL_OVERLAP = "E002_WALL_OVERLAP"
 E_COLUMN_OVERLAP = "E003_COLUMN_OVERLAP"
@@ -50,11 +57,8 @@ E_INVALID_BOUNDS = "E012_INVALID_BOUNDS"
 E_INVALID_MODULE_FILE_PATH = "E013_INVALID_MODULE_FILE_PATH"
 E_DUPLICATE_ZONE_MODULE_FILES = "E014_DUPLICATE_ZONE_MODULE_FILES"
 
-# 指针模型：方案合同文件名（用于 adopted 指针解析 + slug 作用域识别）
-DESIGN_DOC = "DESIGN.md"
-
-# ZoneType 兼容：on-disk 数据用 camelCase 字符串("room"/"designable"/"exclusion")；
-# C# Newtonsoft 读 enum 时字符串/整数都能 parse，Python 直读文件须显式兼容两种表示。
+# ZoneType 兼容：注入数据走整数（C# 业务 enum 整数序列化）；旧 on-disk 数据可能用 camelCase 字符串。
+# 两种表示都兼容，避免 zoneGeometry / 历史文件混用时静默漏判。
 _ZONE_TYPE_ALIASES = {
     "exclusion": ZONE_EXCLUSION,
     "room": ZONE_ROOM,
@@ -89,25 +93,22 @@ def run(request: dict) -> dict:
     target_raw = set(zone_ids) if zone_ids else None
 
     if mode == "normalize":
-        return _run_normalize(project_path, target_raw, variant_id)
+        return _run_normalize(request, project_path)
     if mode == "validate":
-        return _run_validate(project_path, target_raw, variant_id)
+        return _run_validate(request, project_path, target_raw)
     raise ValueError(f"未知 mode: {mode}")
 
 
 # ── normalize（镜像 ModuleNormalizationService.NormalizeModules）──
-def _run_normalize(project_path: str, target_raw: Optional[set], variant_id: Optional[str]) -> dict:
+def _run_normalize(request: dict, project_path: str) -> dict:
     t0 = time.perf_counter()
-    schemes_path = os.path.join(project_path, "schemes")
-    topo = _build_topology(schemes_path)
-    files = _canonical_files(topo, schemes_path, target_raw, variant_id)
-
     diagnostics: list[dict] = []
     normalized_count = 0
     total_modules = 0
     writeback: list[dict] = []
 
-    for abs_path, zone_id in files:
+    # resolvedLeaves 已由 C# 按 zoneIds/variantId 解析好（含变体）；本脚本只读、归一、回写。
+    for abs_path, zone_id in _iter_resolved_files(project_path, request.get("resolvedLeaves")):
         wrapper = _read_modules_wrapper(abs_path)  # 仅认 wrapper，裸数组抛错
         if wrapper is None:
             continue
@@ -132,22 +133,22 @@ def _run_normalize(project_path: str, target_raw: Optional[set], variant_id: Opt
 
 
 # ── validate（镜像 ValidationController.ValidateLayout 全链路）────
-def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Optional[str]) -> dict:
+def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -> dict:
     t0 = time.perf_counter()
-    schemes_path = os.path.join(project_path, "schemes")
-    topo = _build_topology(schemes_path)
 
+    # 几何唯一来源 = C# 注入的 zoneGeometry（叉口-1）；建筑/库仍本地读（与拓扑无关）。
+    zg = request.get("zoneGeometry") or {}
+    design_zones = zg.get("designZones") or []
+    exclusion_zones = zg.get("exclusionZones") or []
     walls, columns = _load_architecture(project_path)
-    design_zones, exclusion_zones = _load_zone_data(project_path, schemes_path)
     library_ids = _load_library_ids(project_path)
 
     all_diags: list[dict] = []
 
     # 1) 先 normalize（写回 + 收集 E007/E008/E009），并保留各文件 modules 供后续校验
-    files = _canonical_files(topo, schemes_path, target_raw, variant_id)
     writeback: list[dict] = []
     loaded: list[tuple[str, list[dict]]] = []  # (zoneId, modules)
-    for abs_path, zone_id in files:
+    for abs_path, zone_id in _iter_resolved_files(project_path, request.get("resolvedLeaves")):
         wrapper = _read_modules_wrapper(abs_path)
         if wrapper is None:
             continue
@@ -160,8 +161,8 @@ def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Opti
         loaded.append((zone_id, modules))
         writeback.append(_writeback_entry(project_path, abs_path, wrapper))
 
-    # 2) 结构层：路径问题（E013/E014）+ bounds 结构预检（E006/E012，剔除非法 bounds 模块）
-    all_diags.extend(_path_issues(topo, schemes_path, target_raw))
+    # 2) 结构层：路径问题（E013/E014）直接并入 C# 传来的 pathIssues + bounds 结构预检（E006/E012）
+    all_diags.extend(_path_issue_diags(request.get("pathIssues")))
 
     valid_modules: list[dict] = []
     skipped = 0
@@ -197,6 +198,54 @@ def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Opti
         "elapsedMs": elapsed,
     }
     return {"report": report, "writeback": writeback}
+
+
+# ── 注入数据消费（P3 §2.8：取代自建拓扑层）─────────────────────
+def _iter_resolved_files(project_path: str, resolved_leaves):
+    """从 C# 注入的 resolvedLeaves 取 (abs_path, leafZoneId)。
+
+    modulesPath 相对 schemes、posix（/ 分隔）；文件不存在则跳过（叶子无 modules.json 不算错）。
+    resolvedLeaves 已在 C# 按 zoneIds/variantId 过滤，本脚本不再自行选文件。
+    """
+    schemes_path = os.path.join(project_path, "schemes")
+    for rl in resolved_leaves or []:
+        rel = rl.get("modulesPath")
+        zone_id = rl.get("leafZoneId")
+        if not rel or not zone_id:
+            continue
+        abs_path = os.path.join(schemes_path, *[s for s in rel.split("/") if s])
+        if not os.path.exists(abs_path):
+            continue
+        yield abs_path, zone_id
+
+
+def _path_issue_diags(path_issues) -> list[dict]:
+    """E013/E014：C# 已解析好的结构化 pathIssues → 诊断。
+
+    code 为全码（"E013_*"/"E014_*"，与本脚本常量逐字一致），直接透传；
+    中文 message 在此本地生成（镜像旧 _path_issues 模板，消费 actualPath/expectedPath/moduleCount）。
+    """
+    out: list[dict] = []
+    for pi in path_issues or []:
+        code = pi.get("code")
+        zone_id = pi.get("zoneId")
+        actual = pi.get("actualPath")
+        expected = pi.get("expectedPath")
+        mc = pi.get("moduleCount")
+        count_text = f"{mc} 个模块" if isinstance(mc, int) else "模块数未知"
+        if code == E_INVALID_MODULE_FILE_PATH:
+            out.append(_diag(
+                E_INVALID_MODULE_FILE_PATH, "error",
+                f"模块文件路径错误：{actual} 不应作为分区 {zone_id} 的 modules.json；"
+                f"期望路径：{expected}；文件内 {count_text}。该文件中的模块已跳过布局验证",
+                zone_id, None, actual, "moduleFile"))
+        elif code == E_DUPLICATE_ZONE_MODULE_FILES:
+            out.append(_diag(
+                E_DUPLICATE_ZONE_MODULE_FILES, "error",
+                f"分区 {zone_id} 存在多个 modules.json：{actual}；"
+                f"规范路径：{expected}；请保留规范路径并人工合并/删除错误路径",
+                zone_id, None, actual, "moduleFile"))
+    return out
 
 
 # ── facing 规范化（镜像 ModuleNormalizationService.NormalizeFacings）─
@@ -438,36 +487,12 @@ def _reverse_dir(d: Optional[str]) -> Optional[str]:
     return {"north": "south", "south": "north", "east": "west", "west": "east"}.get(d, d)
 
 
-# ── 区域 / 建筑 / 库 读取（镜像 ValidationController.Load*）──────
+# ── 建筑 / 库 读取（镜像 ValidationController.Load*）────────────
 def _load_architecture(project_path: str) -> tuple[list[dict], list[dict]]:
     arch = _read_json(os.path.join(project_path, "baseline", "architecture.json"))
     if not isinstance(arch, dict):
         return [], []
     return arch.get("walls") or [], arch.get("columns") or []
-
-
-def _load_zone_data(project_path: str, schemes_path: str) -> tuple[list[dict], list[dict]]:
-    design: list[dict] = []
-    room_zones = _read_json(os.path.join(project_path, "computed", "room_zones.json"))
-    if isinstance(room_zones, list):
-        design.extend(room_zones)
-    scheme_zones = _read_json(os.path.join(schemes_path, "zones.json"))
-    if isinstance(scheme_zones, list):
-        design.extend(_flatten_leaves(scheme_zones))
-    exclusions = _read_json(os.path.join(project_path, "computed", "exclusions.json"))
-    excl = exclusions if isinstance(exclusions, list) else []
-    return design, excl
-
-
-def _flatten_leaves(zones: list[dict]) -> list[dict]:
-    out: list[dict] = []
-    for z in zones:
-        subs = z.get("subZones")
-        if subs:
-            out.extend(_flatten_leaves(subs))
-        else:
-            out.append(z)
-    return out
 
 
 def _load_library_ids(project_path: str) -> Optional[set]:
@@ -518,282 +543,6 @@ def _writeback_entry(project_path: str, abs_path: str, wrapper: dict) -> dict:
             "modules": out_modules,
         },
     }
-
-
-# ── 拓扑（镜像 ModuleFileTopologyService）───────────────────────
-def _build_topology(schemes_path: str) -> dict:
-    """返回 {canonical: {leafZoneId: [segments]}, leaves_by_container: {cid:[..]},
-    containers: set, design_zone_ids: set, has_topology: bool}。"""
-    empty = {"canonical": {}, "leaves_by_container": {}, "containers": set(),
-             "design_zone_ids": set(), "has_topology": False}
-    zones = _read_json(os.path.join(schemes_path, "zones.json"))
-    if not isinstance(zones, list) or len(zones) == 0:
-        return empty
-
-    by_id = {}
-    for z in zones:
-        zid = z.get("id")
-        if zid and zid not in by_id:
-            by_id[zid] = z
-
-    referenced: set = set()
-
-    def collect_ref(zs: list[dict]) -> None:
-        for z in zs:
-            for sub in (z.get("subZones") or []):
-                if sub.get("id"):
-                    referenced.add(sub["id"])
-                if sub.get("subZones"):
-                    collect_ref([sub])
-    collect_ref(zones)
-
-    canonical: dict[str, list] = {}
-    leaves_by_container: dict[str, list] = {}
-    containers: set = set()
-    design_zone_ids: set = set()
-
-    def register(zone_ref: dict, segments: list, stack: set) -> list:
-        zid = zone_ref.get("id")
-        if not zid:
-            return []
-        full = by_id.get(zid, zone_ref)
-        if zid in stack:
-            return []
-        stack.add(zid)
-        try:
-            subs = zone_ref.get("subZones") or full.get("subZones") or []
-            if subs:
-                containers.add(zid)
-                leaf_ids: list = []
-                for sub in subs:
-                    if not sub.get("id"):
-                        continue
-                    leaf_ids.extend(register(sub, segments + [sub["id"]], stack))
-                leaves_by_container[zid] = leaf_ids
-                return leaf_ids
-            if zid not in canonical:
-                canonical[zid] = list(segments)
-            return [zid]
-        finally:
-            stack.discard(zid)
-
-    for z in zones:
-        zid = z.get("id")
-        if not zid or zid in referenced:
-            continue
-        design_zone_ids.add(zid)
-        register(z, [zid], set())
-
-    canonical["_unzoned"] = ["_unzoned"]
-    return {
-        "canonical": canonical,
-        "leaves_by_container": leaves_by_container,
-        "containers": containers,
-        "design_zone_ids": design_zone_ids,
-        "has_topology": True,
-    }
-
-
-def _expand_targets(topo: dict, target_raw: Optional[set]) -> Optional[set]:
-    if not target_raw:
-        return None
-    result = set(target_raw)
-    for zid in target_raw:
-        for leaf in topo["leaves_by_container"].get(zid, []):
-            result.add(leaf)
-    return result
-
-
-def _canonical_path(schemes_path: str, segments: list) -> str:
-    return os.path.join(schemes_path, *segments, "modules.json")
-
-
-def _slug_path(schemes_path: str, zone_id: str, segments: list, slug: str) -> str:
-    """指针模型：slug 直接做设计区下一级（无 variants/ 段），镜像 C# SwapToVariant / BuildLeafEntry。
-    顶层叶子（dz == leaf）→ schemes/{dz}/{slug}/modules.json
-    嵌套叶子（dz != leaf）→ schemes/{dz}/{slug}/{leaf}/modules.json（中间容器一律压平到叶子）。
-    """
-    design_zone_id = segments[0] if segments else zone_id
-    if design_zone_id == zone_id:
-        return os.path.join(schemes_path, design_zone_id, slug, "modules.json")
-    return os.path.join(schemes_path, design_zone_id, slug, zone_id, "modules.json")
-
-
-def _read_adopted_slug(schemes_path: str, design_zone_id: str) -> Optional[str]:
-    """读 schemes/{dz}/DESIGN.md frontmatter 的 adopted 值（镜像 C# SchemeDesignDocService.ResolveAdoptedSlug）。
-    无 DESIGN.md / 无 frontmatter / 无 adopted → None（存量项目回落 legacy canonical，零回归）。
-    只取单字段，按行解析首个 --- ... --- frontmatter 块即可，不引 yaml 依赖。"""
-    design_md = os.path.join(schemes_path, design_zone_id, DESIGN_DOC)
-    if not os.path.exists(design_md):
-        return None
-    try:
-        with open(design_md, "r", encoding="utf-8-sig") as f:
-            text = f.read()
-    except OSError:
-        return None
-    lines = text.splitlines()
-    start = None
-    for i, ln in enumerate(lines):
-        if ln.strip() == "---":
-            start = i
-            break
-    if start is None:
-        return None
-    for ln in lines[start + 1:]:
-        if ln.strip() == "---":
-            break
-        s = ln.strip()
-        if s.startswith("adopted:"):
-            val = s[len("adopted:"):].strip().strip('"').strip("'")
-            return val or None
-    return None
-
-
-def _resolve_leaf_path(schemes_path: str, zone_id: str, segments: list,
-                       variant_id: Optional[str]) -> str:
-    """叶子 modules.json 路径单一解析器（收敛 variant / adopted / legacy 三种）：
-    - 显式 variant_id（候选 validate、场景⑦读特定方案）→ schemes/{dz}/{variant_id}/[{leaf}/]modules.json
-    - 无 variant_id 但父 DESIGN.md 有 adopted:{slug} → schemes/{dz}/{slug}/[{leaf}/]modules.json
-    - 无 adopted（存量未迁移）→ legacy canonical schemes/{*segments}/modules.json（零回归）
-    镜像 C# ModuleFileTopology.SwapToVariant + BuildLeafEntry(ResolveAdoptedCached)。
-    """
-    if variant_id:
-        return _slug_path(schemes_path, zone_id, segments, variant_id)
-    design_zone_id = segments[0] if segments else zone_id
-    adopted = _read_adopted_slug(schemes_path, design_zone_id)
-    if adopted:
-        return _slug_path(schemes_path, zone_id, segments, adopted)
-    return _canonical_path(schemes_path, segments)
-
-
-def _canonical_files(topo: dict, schemes_path: str, target_raw: Optional[set],
-                     variant_id: Optional[str]) -> list[tuple[str, str]]:
-    if not topo["has_topology"]:
-        return _legacy_files(schemes_path)
-    target = _expand_targets(topo, target_raw)
-    entries = []
-    for zid, segments in topo["canonical"].items():
-        if target is not None and zid not in target:
-            continue
-        entries.append((zid, segments))
-    out: list[tuple[str, str]] = []
-    seen = set()
-    for zid, segments in entries:
-        path = _resolve_leaf_path(schemes_path, zid, segments, variant_id)
-        if os.path.exists(path):
-            key = os.path.normcase(os.path.abspath(path))
-            if key not in seen:
-                seen.add(key)
-                out.append((path, zid))
-    return out
-
-
-def _legacy_files(schemes_path: str) -> list[tuple[str, str]]:
-    """无 zones.json 拓扑时的回退（镜像 FindLegacyModuleFiles）。"""
-    out: list[tuple[str, str]] = []
-    if not os.path.isdir(schemes_path):
-        return out
-    for root, _dirs, names in os.walk(schemes_path):
-        if "modules.json" not in names:
-            continue
-        dirname = os.path.basename(root)
-        low = dirname.lower()
-        if low.startswith("rz_") or low.startswith("dz_") or low == "_unzoned":
-            out.append((os.path.join(root, "modules.json"), dirname))
-    if out:
-        return out
-    legacy = os.path.join(schemes_path, "modules.json")
-    if os.path.exists(legacy):
-        out.append((legacy, "legacy"))
-    return out
-
-
-def _is_slug_scoped_in_pointer_zone(schemes_path: str, rel: str) -> bool:
-    """镜像 C# IsSchemeSlugScopedInPointerZone：schemes/{dz}/{slug}/[…/]modules.json
-    （rel 段数≥3 且 dz 有 DESIGN.md）= 指针管理的方案作用域文件，跳过 E013/E014 校验，
-    避免候选 / adopted 目录被误报为非法 canonical 路径。
-    段数<3（如 {dz}/modules.json legacy-spot）照常校验（抓未迁移残留）。"""
-    segments = [s for s in rel.split("/") if s]
-    if len(segments) < 3:
-        return False
-    design_zone_id = segments[0]
-    return os.path.exists(os.path.join(schemes_path, design_zone_id, DESIGN_DOC))
-
-
-# ── 路径问题 E013/E014（镜像 ModuleFileTopology.GetPathIssues）──
-def _path_issues(topo: dict, schemes_path: str, target_raw: Optional[set]) -> list[dict]:
-    if not topo["has_topology"] or not os.path.isdir(schemes_path):
-        return []
-    target = _expand_targets(topo, target_raw)
-    canonical = topo["canonical"]
-    # canonical 期望路径同样经 adopted 重定向（与 _resolve_leaf_path 同源），
-    # 使指针区的 legacy-spot 残留 schemes/{dz}/modules.json 能被正确标为 E013（镜像 C#）。
-    canonical_abs = {zid: os.path.normcase(os.path.abspath(_resolve_leaf_path(schemes_path, zid, seg, None)))
-                     for zid, seg in canonical.items()}
-
-    records: list[tuple[str, str, str]] = []  # (zoneId, absPath, relPath)
-    for root, _dirs, names in os.walk(schemes_path):
-        if "modules.json" not in names:
-            continue
-        abs_path = os.path.join(root, "modules.json")
-        if "/variants/" in abs_path.replace("\\", "/").lower():
-            continue
-        rel = os.path.relpath(abs_path, schemes_path).replace("\\", "/")
-        if _is_slug_scoped_in_pointer_zone(schemes_path, rel):
-            continue
-        zone_id = "legacy" if rel == "modules.json" else os.path.basename(os.path.dirname(abs_path))
-        if target is not None and zone_id not in target:
-            continue
-        records.append((zone_id, abs_path, rel))
-
-    issues: list[dict] = []
-    for zone_id, abs_path, rel in records:
-        canon = canonical_abs.get(zone_id)
-        if canon is not None and os.path.normcase(os.path.abspath(abs_path)) == canon:
-            continue  # canonical，合法
-        issues.append(_diag(E_INVALID_MODULE_FILE_PATH, "error",
-                            f"模块文件路径错误：{rel} 不应作为分区 {zone_id} 的 modules.json；"
-                            f"期望路径：{_expected_path(topo, schemes_path, zone_id)}；"
-                            f"文件内 {_count_modules_text(abs_path)}。该文件中的模块已跳过布局验证",
-                            zone_id, None, rel, "moduleFile"))
-
-    # 同一 zoneId 多文件 → E014
-    by_zone: dict[str, list[str]] = {}
-    for zone_id, _abs, rel in records:
-        by_zone.setdefault(zone_id, []).append(rel)
-    for zone_id, rels in by_zone.items():
-        if len(rels) <= 1:
-            continue
-        issues.append(_diag(E_DUPLICATE_ZONE_MODULE_FILES, "error",
-                            f"分区 {zone_id} 存在多个 modules.json：{', '.join(rels)}；"
-                            f"规范路径：{_expected_path(topo, schemes_path, zone_id)}；"
-                            f"请保留规范路径并人工合并/删除错误路径",
-                            zone_id, None, ", ".join(rels), "moduleFile"))
-    return issues
-
-
-def _expected_path(topo: dict, schemes_path: str, zone_id: str) -> str:
-    canonical = topo["canonical"]
-    if zone_id in canonical:
-        return os.path.relpath(_canonical_path(schemes_path, canonical[zone_id]), schemes_path).replace("\\", "/")
-    if zone_id in topo["containers"]:
-        leaves = [os.path.relpath(_canonical_path(schemes_path, canonical[lid]), schemes_path).replace("\\", "/")
-                  for lid in topo["leaves_by_container"].get(zone_id, []) if lid in canonical]
-        if leaves:
-            return "容器分区不承载 modules.json；请写入叶子分区：" + ", ".join(leaves)
-        return "容器分区不承载 modules.json"
-    return "zones.json 中未定义此叶子分区"
-
-
-def _count_modules_text(abs_path: str) -> str:
-    try:
-        with open(abs_path, "r", encoding="utf-8-sig") as f:
-            token = json.load(f)
-        if isinstance(token, dict) and isinstance(token.get("modules"), list):
-            return f"{len(token['modules'])} 个模块"
-    except Exception:  # noqa: BLE001
-        pass
-    return "模块数未知"
 
 
 # ── 通用工具 ────────────────────────────────────────────────────
