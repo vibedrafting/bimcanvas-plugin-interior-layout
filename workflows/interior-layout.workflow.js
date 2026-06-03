@@ -168,21 +168,26 @@ async function genOverview(retryNote){
     `${retryNote || ''}`,
     { agentType: 'multi-plan-agent', schema: OVERVIEW_SCHEMA, label: 'multiplan', phase: '多方案生成' })
 }
-function diverseEnough(ov){
-  return new Set((ov?.variants || []).map(v => v.anchorSeedType)).size >= 2
-}
-let overview = await genOverview()
-if (!diverseEnough(overview) && (overview?.variants || []).length > 1) {
-  log('多样性护栏未过（anchorSeedType 类型 < 2），要求重出 1 次')
-  const re = await genOverview('上一轮变体的 anchorSeedType 类型不足 2 种，请保证类型至少跨 2 种重出。')
-  if (diverseEnough(re) || (re?.variants || []).length <= 1) overview = re
-  else log('重出后类型仍 < 2，按现状放行（避免死循环），由裁决阶段兜底')
-}
-await writeSections(parentDesign, [overviewBlock(overview)], '多方案生成')
+// 红线15：多样性护栏必须在【落地集】上校验。先收敛 N → slice → 在 sliced 集上验类型≥2，
+// 否则 variants 数 > N 时（如 proposedN>4 被 clamp 到 4）护栏在全集通过、落地的前 N 个却可能全同类型。
+function pickN(ov){ return Math.min(clampN(args?.n || ov?.proposedN), 4) }
+function chooseVariants(ov){ return (ov?.variants || []).slice(0, pickN(ov)) }
+function diverseEnough(vs){ return new Set(vs.map(v => v.anchorSeedType)).size >= 2 }
 
-// 自适应收敛 + slug 清单
-N = Math.min(clampN(args?.n || overview?.proposedN), 4)
-const variants = (overview?.variants || []).slice(0, N)
+let overview = await genOverview()
+let chosen = chooseVariants(overview)
+if (chosen.length > 1 && !diverseEnough(chosen)) {
+  log('多样性护栏未过（落地集 anchorSeedType 类型 < 2），要求重出 1 次')
+  const re = await genOverview('上一轮入选（系统只采用前 N 个）变体的 anchorSeedType 类型不足 2 种，请保证类型至少跨 2 种重出。')
+  const reChosen = chooseVariants(re)
+  if (reChosen.length <= 1 || diverseEnough(reChosen)) { overview = re; chosen = reChosen }
+  else log('重出后落地集类型仍 < 2，按现状放行（避免死循环），由裁决阶段兜底')
+}
+await writeSections(parentDesign, [overviewBlock({ ...overview, variants: chosen })], '多方案生成')
+
+// 落地集（= 收敛后 slice，护栏已在其上校验/兜底）
+const variants = chosen
+N = variants.length
 const vcOf = {}
 for (const v of variants) vcOf[v.slug] = {
   variantDirection: v.direction, variantNarrative: v.narrative,
