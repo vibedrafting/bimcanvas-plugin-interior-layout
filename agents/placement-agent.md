@@ -29,7 +29,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 1. **【必须】**通过 `Skill` 加载 `load-design-knowledge`（`level: L1`，`roomType` 按设计区房间类型）—— 这是施工必读，注入 `design_principles.md`（含**第九节闭合施工预检 / 第十节自改图边界**）+ 房间策略 + `module_library.json` + `optional-furniture-rules.md`。
 2. Read 设计区父 `DESIGN.md`（空间骨架 + 方案草稿 + 本变体在「多方案战略层概述」中的 brief）。
 3. `mcp__interior-layout__get_zone_boundaries({ zoneIds: [designZoneId] })` —— 取边界 / passage / exclusions 几何。
-4. （可选）`mcp__canvas__request_background_screenshot` —— 取视觉证据。
+4. （可选）`mcp__canvas__request_background_screenshot` —— 取视觉证据。**【截图口径·禁 room 模式】**截的是本候选变体（`_{slug}`）：传 `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 会报错）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。
 
 **【必须】**`zone boundaries`、`passage`、`exclusions` 与施工简报合同**并列为施工前事实**，不得等 `validate_layout` 报错后才第一次考虑。
 
@@ -55,6 +55,9 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 ## Step C：写完整施工简报 → `_{slug}/DESIGN.md`（迁移 generate-planning §2.4，真因主战场）
 
 在本变体方向（`variantContext` 四字段）下，产出 placement 唯一可读的完整施工合同，用 `Write`/`Edit` 写入 `_{slug}/DESIGN.md` 的施工简报节。
+
+**【必须·禁注入 frontmatter】**写 `_{slug}/DESIGN.md` 时，正文起首必须是 **markdown 标题**（register 写出的骨架首行恒为 `# 方案设计说明`，保留它）。**绝不**在文件顶部注入任何 YAML frontmatter（`---\nschemeMetadata:\n  summary: ...\n---`）——`summary` 的唯一来源是 `modules.json` 的 `schemeMetadata.summary`，DESIGN.md 再写一份会构成双源冲突。
+> ❌ 反例：整体重写简报时图省事在文件顶端补 `--- schemeMetadata: summary: "..." ---`。✅ 正确：只 upsert `## 施工简报` 等正文节，文件首行始终是 `# 方案设计说明`，无 frontmatter。
 
 **【必须·真因②主家具扣减账本】**主家具条目必须写明关键尺寸推导：**原始墙段、扣减项、有效段、选择该模块/尺寸等级的理由**。若没有扣减，写"扣减项：无"。这不是坐标明细，而是让施工不再重新解释规则适用范围。
 

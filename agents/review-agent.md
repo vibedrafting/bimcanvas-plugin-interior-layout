@@ -35,9 +35,11 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 **【必须】**三层不重叠：`__general__` 维**只**判靠墙/相邻空隙/对齐，不替 validate 做几何校验、也不做五维设计判断；单维只判被指定的那一个设计维度。
 
+**【必须·`__general__` 负向锚】**`__general__` 维**不复述通道 / 通行宽度**（如"床前 950mm 通道""≥900mm 主通道宽裕"）——那是 Layer1 `validate_layout` 的事，不属本维。本维只回答"靠墙 / 相邻空隙 / 对齐规不规整"，判据见 `design_evaluation.md` 的「Layer 1.5 通用品质」节。
+
 ## 入场动作
 
-1. `mcp__canvas__request_background_screenshot` —— 取该变体当前视觉证据。
+1. `mcp__canvas__request_background_screenshot` —— 取该变体当前视觉证据。**【截图口径·禁 room 模式】**评审的是候选变体（`_{slug}`）：必须传 `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 会报错）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。
 2. Read 目标变体 `_{slug}/{leaf}/modules.json` 与 `_{slug}/DESIGN.md`（含施工简报，了解该变体的既定方向）。
 3. `mcp__interior-layout__get_zone_boundaries` —— 取边界/passage。
 4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）。**判据来自 `design_evaluation.md`，不在本 prompt 复述**。
@@ -46,6 +48,9 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 - **判据交还知识层**：单维的判据来自 `design_evaluation.md` 对应维度的"判断时 ✓/✗"标准，**不在 agent prompt 里重抄**——从 Skill 注入的内容里取。
 - **【必须】截图为准**：审查时以当前视觉证据为准。若截图显示布局与 `modules.json` 不一致，以截图为准重新审查，**不得用已写入数据解释截图**（尤其检查：窗帘是否被验证碰撞截断、衣柜是否无故偏小、床体是否过度占压、留白是否是有意缓冲而非残留）。
+- **【必须】截图降级分支（视觉验证缺失时）**：若截图工具返回 `unsupported image` / 渲染失败 / 无可用图像（当前模型档可能拒收 image），**不得**即兴"按坐标完成"冒充已视觉验证。此时必须：① 在对应 finding 显式记 `[视觉验证缺失]`；② 本维 `score` 标**低置信**（不得仅凭坐标给高分）；③ **截图专属核查项**（窗帘是否被碰撞截断、衣柜是否无故偏小、床体是否过度占压等坐标层看不出、只有视觉能抓的项）**一律不得给"通过"**——只能记为未获视觉验证；④ **禁用 modules.json 坐标冒充视觉证据宣布达标**。
+- **【必须】定量硬反例必明确认定**：`design_evaluation.md` 中带数值阈值的 ✗ 条目（如"<600mm 窄缝"），只要证据可由 `modules.json` 坐标**直接算出**（如两件家具间隙=500mm），就**必须出明确负向 finding**——不得软化为"待确认 / 接近 / 疑似"，`score` 上必须体现扣减。此类纯坐标判定**不受截图渲染成败影响**（截图缺位不是软化硬反例的理由）。
+- **【必须】枚举与计数一致**：finding 里同句的"枚举件数"与"计数文字"不得自相矛盾（如枚举出 4 件却写"七件共享同一锚线"）；写计数前先数清同句列出的对象数，全屋模块总数 ≠ 某锚线上的件数。
 - **directionRespecting（防越界扣分）**：评审针对该变体**既定的设计方向**评分。"建议换一个方向"不是本变体的扣分理由——若你的某条建议本质是"改方向"，把它标为不在既定方向内（`directionRespecting=false`），避免裁判把"换方向"当成淘汰本变体的依据。
 - **建议分级**：每条 suggestion 标 `strategy级`（改战略/方向）或 `placement级`（改落位），供裁判/优化分辨。
 - findings 要**带证据**（坐标 / 截图所见）。

@@ -26,6 +26,9 @@ function clampN(raw){ const n = Math.max(1, raw || 3); return Math.min(n, 4) }  
 let N = clampN(args?.n)
 
 // ── 结构化输出 schema（4 个）─────────────────────────────────────
+// 【契约·三处同名钉死】Step3 变体字段短名（direction/narrative/anchorSeed/avoidance/anchorSeedType）
+// 必须三处一致：① 本 OVERVIEW_SCHEMA 属性名 ② multi-plan-agent.md 产出字段名 ③ 下方 vcOf 读取的 v.* 短名。
+// vcOf 负责把短名映射回 placement 用的长名（variantDirection 等），勿在 agent 侧改回长名。
 const OVERVIEW_SCHEMA = {  // Step3 返回
   type: 'object', required: ['variants', 'proposedN'],
   properties: {

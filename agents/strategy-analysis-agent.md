@@ -40,9 +40,10 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 产出（return，不写盘）
 
-把以下「用户诉求 + 项目基础信息」节内容作为最终回复 `return`，由 workflow 写入设计区父 `DESIGN.md`：
+**【必须】return 第一行必须是 markdown 标题 `## 用户诉求 + 项目基础信息`**（首字符即 `#`）；**禁前缀任何散文 / 英文推理段 / 代码围栏（` ```markdown `）**——你的 return 被 workflow 直接写盘，首行非标题会导致 anchor 落空、内容堆到文件末尾污染父 DESIGN.md。
 
-```markdown
+把以下「用户诉求 + 项目基础信息」节内容作为最终回复 `return`，由 workflow 写入设计区父 `DESIGN.md`（下方为结构示意，照此组织、不要把它当代码块包裹）：
+
 ## 用户诉求 + 项目基础信息
 
 ### 用户诉求
@@ -56,6 +57,5 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ### 战略取舍与存疑
 - `[自动代决] ...`（如有；无则写"无"）
-```
 
 只 return 上述节内容本身，不要附加编排说明、不要描述下一步该派谁。

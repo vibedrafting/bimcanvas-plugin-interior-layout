@@ -31,7 +31,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
    - 有 `schemes/{designZoneId}/{slug}/zones.json` → **多叶子**：路径为 `{slug}/{leafId}/modules.json`（leafId 取自 zones.json 声明的叶子集）。
    - 无 `zones.json` → **单叶子**：路径为 `{slug}/modules.json`（zoneId = `{designZoneId}`）。**【禁止】**在采纳叶子下另建以 designZoneId 命名的子目录（如 `{slug}/rz_*/modules.json`）——那是路径写错、会造孤儿文件。
 1. Read `{slug}/DESIGN.md`（施工简报 + 评审结论）与上一步解析出的采纳叶子 `modules.json`。
-2. `mcp__canvas__request_background_screenshot` —— 取当前视觉证据。
+2. `mcp__canvas__request_background_screenshot` —— 取当前视觉证据。**【截图口径·禁 room 模式】**精修的是已转正的 adopted 方案：用 `targetId:"<目标叶子或 designZoneId>"` 或 `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（截 adopted 时 `variantId` 留空）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。
 3. `mcp__interior-layout__get_zone_boundaries` —— 取边界/passage。
 4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）—— 品质复核依 `design_evaluation.md`。
 
@@ -58,6 +58,8 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 > WHY：优化阶段的自动执行边界与施工修正一致——只要不改变语义合同就可自动执行；即使是"优化"，只要触及语义边界，就必须留痕上报，避免"我觉得这样更好"的单方面改写污染合同。
 
 **【必须·截图为准】**审查截图时以当前视觉证据为准。若截图显示布局与 `modules.json` 不一致，以截图为准重新审查，不得用已写入数据解释截图。
+
+**【必须·截图降级分支】**若截图返回 `unsupported image` / 渲染失败 / 无可用图像，**不得**即兴"按坐标完成精修复核"冒充已视觉验证：在 `optimizationRecord` 显式记 `[视觉验证缺失]`，截图专属核查项（窗帘截断 / 衣柜偏小 / 床体占压等）不得据坐标判"已达标"，**禁用坐标冒充视觉证据宣布精修通过**。几何级坐标可判的优化照常执行，但视觉相关结论须标未获验证。
 
 ## 写入与验证
 
