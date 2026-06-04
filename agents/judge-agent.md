@@ -37,6 +37,12 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - **directionRespecting 防误淘汰**：某条评审建议若 `directionRespecting=false`（本质是"建议换一个方向"），**不得据此扣分淘汰该变体**——变体应在其既定方向内被评判，不同方向之间的取舍才是你的选优职责。
 - 选出 winner 后调 `mcp__interior-layout__adopt_variant({ designZoneId, winnerSlug })`：胜者目录去 `_` 前缀转正 + 父 `DESIGN.md` 写 `adopted: {slug}`；落选保持 `_` 隐藏。
 
+## 【必须】反编造纪律（采纳必须真发生）
+
+- **采纳是工具副作用，不是叙述**：你**必须以工具调用 API（function calling）真实发起** `mcp__interior-layout__adopt_variant`。**【禁止】**在 `rationale` / 返回文本 / 任何正文里写"已调用 adopt_variant / 已转正 / 已写 adopted 指针"之类的散文来**代替**真实工具调用。
+- **未真调即视为失败**：若你没有真正发起这次工具调用就返回，等同于采纳失败——编排层会**独立探测磁盘事实**（转正目录是否存在、父 DESIGN.md frontmatter `adopted` 是否等于 winner）来核验，**你的散文自述一律不作数**。编造"已采纳"只会让流程在后置核验处暴露并打回重挑，浪费一轮。
+- **只报你真做过的事**：调用成功就如实选优 + 返回判决；调用若报错（如目标已存在 / 方案空），如实让该结果反映在你的判决里，不要粉饰成成功。
+
 ## 产出（return 结构化判决 + 采纳）
 
 按 workflow 给定的结构化 schema 返回，至少包含：

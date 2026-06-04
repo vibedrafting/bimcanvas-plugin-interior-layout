@@ -69,9 +69,29 @@ const JUDGE_REFINE_SCHEMA = {  // Step7 精修判决（optimization 返回）
   type: 'object', required: ['passed'],
   properties: {
     passed: { type: 'boolean' },
+    layer1Fail: { type: 'boolean' },                   // 工程合规硬伤兜底（如 E013/0 模块=路径错），与 passed 互斥语义
     rootCause: { type: 'string', enum: ['strategy', 'placement', 'none'] },  // 决定 fix 改哪层
     reviseInstruction: { type: 'string' },
     failedDimensions: { type: 'array', items: { type: 'string' } },
+    optimizationRecord: { type: 'string' },            // R5：「## 优化记录」节文本，交 workflow 经 design-scribe upsert（不自写 DESIGN.md）
+  },
+}
+// ── 编排层确定性后置核验 schema（verify-agent 只报事实，控制流在脚本）─────
+const ADOPT_VERIFY_SCHEMA = {  // Step6 后采纳收口核验
+  type: 'object', required: ['adoptedSlug', 'promoted'],
+  properties: {
+    adoptedSlug: { type: 'string' },                   // 回读父 DESIGN.md frontmatter 实际 adopted（未采纳填空串）
+    promoted: { type: 'boolean' },                     // 转正目录（无 _ 前缀）是否真实存在
+    repaired: { type: 'boolean' },                     // 本次是否由 verify-agent 补调了 adopt_variant
+  },
+}
+const VALIDATE_GATE_SCHEMA = {  // Step7 后独立 validate 闸门
+  type: 'object', required: ['fileModuleCount', 'validateModuleCount', 'e013'],
+  properties: {
+    fileModuleCount: { type: 'number' },               // 采纳叶子 modules.json 实际模块数（读文件数）
+    validateModuleCount: { type: 'number' },           // validate_layout 解析到的模块数
+    e013: { type: 'boolean' },                          // 是否报 E013_INVALID_MODULE_FILE_PATH（路径错）
+    reason: { type: 'string' },
   },
 }
 
@@ -80,9 +100,21 @@ const parentDesign = `schemes/${designZoneId}/DESIGN.md`
 const hiddenDesign = slug => `schemes/${designZoneId}/_${slug}/DESIGN.md`
 const adoptedDesign = slug => `schemes/${designZoneId}/${slug}/DESIGN.md`
 
+// ── 节块净化（P-4）：剥 agent return 夹带的散文/英文前言与包裹围栏，再交 scribe ──
+// 仅做"剥到首个 markdown 标题 + 去整体包裹围栏"这类机械清理，不改节内文字（不违逐字红线）。
+function sanitizeSection(s){
+  if (!s) return s
+  let t = String(s).trim()
+  const fence = t.match(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/)   // 整体被 ```lang … ``` 包裹 → 剥壳
+  if (fence) t = fence[1].trim()
+  const h = t.search(/^#{1,6}\s/m)                           // 首个 markdown 标题位置
+  if (h > 0) t = t.slice(h)                                  // 标题前的散文/英文前言剥掉；无标题(-1)/标题在首则不动
+  return t.trim()
+}
+
 // ── 写盘 helper：把 markdown 节块串行交给 design-scribe（单写者，无并发同文件）──
 async function writeSections(path, blocks, phaseName){
-  const sections = blocks.filter(Boolean)
+  const sections = blocks.filter(Boolean).map(sanitizeSection).filter(Boolean)
   if (!sections.length) return
   const packed = sections.map((b, i) => `<<<SECTION ${i}>>>\n${b}`).join('\n\n')
   await agent(
@@ -106,7 +138,8 @@ function reviewBlock(slug, reviews){
     `${r.layer1Fail ? ' ⚠layer1Fail' : ''}${r.directionRespecting === false ? ' [非既定方向建议]' : ''}\n` +
     `  - findings：${(r.findings || []).join('；') || '无'}\n` +
     `  - suggestions：${(r.suggestions || []).join('；') || '无'}` +
-    (r.generalChecks ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''))
+    (r.dimension === GENERAL && r.generalChecks && Object.keys(r.generalChecks).length
+      ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''))   // 3.1：仅 __general__ 维渲染，空对象 {} 也滤掉
   return `## 评审结论\n\n${items.join('\n')}`
 }
 function verdictBlock(v){
@@ -124,18 +157,38 @@ function criticPrompt(slug, dim, designPath){
   return `${base}\n你评审变体 slug=${slug} 的【单一维度】 dimension=「${dim}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
     `只评这一个维度，按你的职责返回结构化评审；判据自行从知识层取，不在此复述。`
 }
-function judgePrompt(candidates){
+function judgePrompt(candidates, excluded){
   const ctx = candidates.map(c => `- slug=${c.slug}（评审 ${c.reviews.length} 份）`).join('\n')
-  return `${base}\n原始用户诉求：${userRequest || '（见父 DESIGN.md 战略简报）'}\n候选变体：\n${ctx}\n` +
+  const exc = (excluded && excluded.length)
+    ? `\n【已被采纳闸门打回、不得再选】：${excluded.join('、')}（这些方案无法转正/采纳，从候选中剔除）。` : ''
+  return `${base}\n原始用户诉求：${userRequest || '（见父 DESIGN.md 战略简报）'}\n候选变体：\n${ctx}${exc}\n` +
     `读各候选评审结论（${candidates.map(c => `_${c.slug}/DESIGN.md`).join('、')}）+ 父 DESIGN.md 用户喜好，选出最优并调 adopt_variant 采纳；返回结构化判决。`
 }
 function judgeDegeneratePrompt(slug){
   return `${base}\n仅有唯一候选变体 slug=${slug}（N=1 退化路径，无需选拔），直接调 adopt_variant 采纳它；返回结构化判决，winner=${slug}。`
 }
 function refinePrompt(slug){
-  return `${base}\n对已采纳的最优方案 slug=${slug}（已转正，路径 ${slug}/）做固定 ${REFINE_ROUND} 轮精修：` +
+  return `${base}\n对已采纳的最优方案 slug=${slug}（已转正，路径 schemes/${designZoneId}/${slug}/）做固定 ${REFINE_ROUND} 轮精修：` +
+    `入场先 Glob/Read 实际 modules.json 路径（单叶子 ${slug}/modules.json 或多叶子 ${slug}/{leaf}/modules.json，不凭拼），` +
     `读其最新评审结论 → 提取可优化项 → 修复（不改方向；几何级可自动、语义级记 [自动改图建议]）→ validate。` +
-    `返回结构化精修判决（passed / rootCause / reviseInstruction / failedDimensions）。`
+    `不要自写 DESIGN.md：把「## 优化记录」节文本放进返回的 optimizationRecord 字段，由编排层写盘。` +
+    `返回结构化精修判决（passed / layer1Fail / rootCause / reviseInstruction / failedDimensions / optimizationRecord）。`
+}
+// 采纳收口核验（verify-agent，只报事实）：探测转正态 → 未满足补调 adopt_variant → 回读校验
+function adoptVerifyPrompt(slug){
+  return `${base}\n你是采纳收口核验分身（只报事实，不做设计判断、不决定重挑/跳过）。胜者 slug=${slug}。\n` +
+    `① Glob schemes/${designZoneId}/ 探测：转正目录「${slug}」（无 _ 前缀）是否存在、隐藏目录「_${slug}」是否仍在；Read 父 DESIGN.md（schemes/${designZoneId}/DESIGN.md）首部 frontmatter 取 adopted。\n` +
+    `② 若未真转正（转正目录缺失 或 adopted≠${slug}）：以 function-calling 调 adopt_variant({ designZoneId:"${designZoneId}", winnerSlug:"${slug}" }) 补做（幂等可重入）。\n` +
+    `③ 回读校验：再次确认转正目录存在 + 父 DESIGN.md frontmatter adopted 的真实值。\n` +
+    `返回 { adoptedSlug:回读到的真实 adopted（无则空串）, promoted:转正目录是否存在, repaired:本次是否补调过 adopt_variant }。`
+}
+// 独立 validate 闸门（verify-agent，只报事实，不自判 passed）
+function validateGatePrompt(slug){
+  return `${base}\n你是精修后置 validate 闸门分身（只报事实，不自判 passed/通过、不决定重试/跳过）。采纳方案 slug=${slug}。\n` +
+    `① Glob/Read 解析采纳叶子真实路径与叶子 zoneIds：有 schemes/${designZoneId}/${slug}/zones.json → 多叶子，取其声明的叶子集；无 → 单叶子，路径 ${slug}/modules.json、zoneId=${designZoneId}。\n` +
+    `② Read 各采纳叶子 modules.json，数其 modules 数组实际长度之和 = fileModuleCount。\n` +
+    `③ 调 validate_layout({ zoneIds:[采纳叶子 zoneIds] })，取其解析到的模块数 = validateModuleCount；若返回 E013_INVALID_MODULE_FILE_PATH 则 e013=true。\n` +
+    `返回 { fileModuleCount, validateModuleCount, e013, reason:一句话说明 }。最终是否通过由编排层判定，你只给原始数字与 e013。`
 }
 
 // ═══════════════ 七步编排 ═══════════════
@@ -180,8 +233,9 @@ if (chosen.length > 1 && !diverseEnough(chosen)) {
   log('多样性护栏未过（落地集 anchorSeedType 类型 < 2），要求重出 1 次')
   const re = await genOverview('上一轮入选（系统只采用前 N 个）变体的 anchorSeedType 类型不足 2 种，请保证类型至少跨 2 种重出。')
   const reChosen = chooseVariants(re)
-  if (reChosen.length <= 1 || diverseEnough(reChosen)) { overview = re; chosen = reChosen }
-  else log('重出后落地集类型仍 < 2，按现状放行（避免死循环），由裁决阶段兜底')
+  overview = re; chosen = reChosen                       // N-9：无条件放行第二轮（最新重出版本），保留单次重试边界
+  if (!(reChosen.length <= 1 || diverseEnough(reChosen)))
+    log('重出后落地集类型仍 < 2，仍放行第二轮（避免死循环），由裁决阶段兜底')
 }
 await writeSections(parentDesign, [overviewBlock({ ...overview, variants: chosen })], '多方案生成')
 
@@ -197,6 +251,7 @@ const slugs = variants.map(v => v.slug)
 if (!slugs.length) return { ok: false, reason: 'Step3 未产出任何变体' }
 const degenerate = N === 1 || slugs.length === 1
 log(`N=${slugs.length}（${degenerate ? 'N=1 退化' : '常规'}）；变体：${slugs.join('、')}`)
+if (!degenerate && DIMS.length === 0) log('⚠ 未注入评审维度（args.dimensions 缺），Step5 将仅跑通用维——多维评审失效')   // N-11
 
 // Step4 多方案落地 ↔ Step5 多维评审（pipeline 重叠：每 slug 落地 resolve 即扇出其评审）
 phase('多方案落地')
@@ -223,19 +278,48 @@ const reviewed = await parallel(slugs.map(slug => async () => {
 const valid = reviewed.filter(r => r && !r.failed)
 if (!valid.length) return { ok: false, reason: '全部候选落地失败（不强宣成功）' }   // 对齐 D14 验证闸门
 
-// Step6 裁决：聚合评审选最优 + 采纳（judge 内部调 adopt_variant）
+// Step6 裁决 + 采纳收口（R1）：judge 选最优（仍内部调 adopt_variant），但其 prose 自述不作数；
+// 编排层用零领域 verify-agent 独立探测→补做 adopt→回读校验。采纳失败则打回裁决、排除坏胜者重挑 1 次。
 phase('裁决')
-const verdict = await agent(
-  degenerate ? judgeDegeneratePrompt(valid[0].slug) : judgePrompt(valid),
-  { agentType: 'judge-agent', schema: JUDGE_SELECT_SCHEMA, label: 'judge:select', phase: '裁决' })
-const winnerSlug = verdict?.winner || valid[0].slug
-await writeSections(parentDesign, [verdictBlock(verdict)], '裁决')   // 正文节 workflow 写；frontmatter 由 adopt_variant 写（二者串行不并发）
+let winnerSlug = null
+let adoptOk = false
+const excluded = []
+for (let attempt = 0; attempt < 2 && !adoptOk; attempt++) {
+  const pool = valid.filter(c => !excluded.includes(c.slug))
+  if (!pool.length) break
+  const verdict = await agent(
+    degenerate ? judgeDegeneratePrompt(pool[0].slug) : judgePrompt(pool, excluded),
+    { agentType: 'judge-agent', schema: JUDGE_SELECT_SCHEMA, label: `judge:select${attempt ? '-retry' : ''}`, phase: '裁决' })
+  winnerSlug = verdict?.winner || pool[0].slug
+  await writeSections(parentDesign, [verdictBlock(verdict)], '裁决')   // 正文节 workflow 写；frontmatter 由 adopt_variant 写（二者串行不并发）
+  // 采纳确定性后置核验（verify-agent 只报事实，控制流在脚本）
+  const adopt = await agent(adoptVerifyPrompt(winnerSlug),
+    { agentType: 'verify-agent', schema: ADOPT_VERIFY_SCHEMA, label: `adopt:${winnerSlug}`, phase: '裁决' })
+  if (adopt && adopt.adoptedSlug === winnerSlug && adopt.promoted) {
+    adoptOk = true
+    if (adopt.repaired) log(`采纳由编排层补做生效（judge 未真转正，verify-agent 补调 adopt）：${winnerSlug}`)
+  } else {
+    log(`采纳收口失败（${winnerSlug}：adoptedSlug=${adopt?.adoptedSlug ?? 'null'}, promoted=${adopt?.promoted}），打回裁决排除该胜者重挑`)
+    excluded.push(winnerSlug)
+  }
+}
+if (!adoptOk) throw new Error(`采纳收口失败：重挑后仍无有效可采纳胜者（已排除 ${excluded.join('、') || '无'}）`)
 
-// Step7 精修：固定 1 轮（采纳方案已转正，路径 {slug}/）
+// Step7 精修：固定 1 轮（采纳方案已转正）
 phase('精修')
 const refine = await agent(refinePrompt(winnerSlug),
   { agentType: 'optimization-agent', schema: JUDGE_REFINE_SCHEMA, label: `refine:${winnerSlug}`, phase: '精修' })
-// optimization 自写 {slug}/{leaf}/modules.json + {slug}/DESIGN.md「优化记录」节（私有，无竞态）
+// optimization 仅 Edit 采纳叶子 modules.json（单叶子 {slug}/modules.json 或多叶子 {slug}/{leaf}/modules.json，入场自行 Glob 解析）；
+// R5：「优化记录」节由 optimization 经 schema 返回、workflow 经 design-scribe upsert，保评审节不被全量重建压成占位。
+if (refine?.optimizationRecord) await writeSections(adoptedDesign(winnerSlug), [refine.optimizationRecord], '精修')
+
+// R2 独立后置 validate 闸门：不信 optimization 自报 passed，verify-agent 独立重跑 validate 比对模块数；最终布尔在脚本算。
+const gate = await agent(validateGatePrompt(winnerSlug),
+  { agentType: 'verify-agent', schema: VALIDATE_GATE_SCHEMA, label: `gate:${winnerSlug}`, phase: '精修' })
+const layer1Pass = !!gate && !gate.e013 && gate.validateModuleCount === gate.fileModuleCount && gate.fileModuleCount > 0
+const refinePassed = !!(refine?.passed) && !refine?.layer1Fail && layer1Pass
+if (!refinePassed)
+  log(`精修后置闸门未过（如实汇报、不重试）：refine.passed=${refine?.passed}, refine.layer1Fail=${refine?.layer1Fail}, e013=${gate?.e013}, validateCount=${gate?.validateModuleCount}, fileCount=${gate?.fileModuleCount}`)
 
 return {
   ok: true,
@@ -243,5 +327,5 @@ return {
   winner: winnerSlug,
   candidates: slugs,
   degenerate,
-  refinePassed: refine?.passed ?? null,
+  refinePassed,
 }
