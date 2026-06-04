@@ -26,13 +26,14 @@
 4. **吐一个 `Workflow` 工具调用,拉起插件预置脚本**(如同调 Skill/Task)。
 
    **🔴 铁律(违反必出错,务必照做):**
-   - **必须用 `scriptPath` 字段引用插件已预置、已验证的脚本** `workflows/interior-layout.workflow.js`;**严禁用 `script` 字段内联自己编写 workflow 脚本**。预置脚本已写好完整七步编排与正确的 `agent()` 调用约定;你自己写极易把 `agent()` 参数传错(例如误传成 `agent({prompt, schema})` 而非 `agent("prompt字符串", {schema})`),导致每个分身收到 `[object Object]`、整条流程作废。
+   - **必须用 `scriptPath` 字段引用插件已预置、已验证的脚本**(预置脚本 = 插件 `workflows/interior-layout.workflow.js`);**严禁用 `script` 字段内联自己编写 workflow 脚本**。预置脚本已写好完整七步编排与正确的 `agent()` 调用约定;你自己写极易把 `agent()` 参数传错(例如误传成 `agent({prompt, schema})` 而非 `agent("prompt字符串", {schema})`),导致每个分身收到 `[object Object]`、整条流程作废。
+   - **`scriptPath` 必须是绝对路径**:取系统提示词里注入的「插件根」(形如 `插件根: C:/.../plugins/interior-layout`),原样拼上 `/workflows/interior-layout.workflow.js`。**严禁用相对路径**——SDK 按项目目录(cwd)解析相对路径,在项目目录下找不到插件脚本而报 `Workflow script file not found`。
    - 你**只负责拉起**它,**不要复制 / 改写 / 重新生成脚本内容**,也不要碰脚本内部的 `agent()` 写法——脚本内部如何编排不归你管。
 
    **调用示例(照此格式,只改 `args` 取值):**
    ```json
    {
-     "scriptPath": "workflows/interior-layout.workflow.js",
+     "scriptPath": "<插件根>/workflows/interior-layout.workflow.js",
      "args": {
        "designZoneId": "rz_3",
        "originalUserRequest": "为主卧设计最优布局",
@@ -41,7 +42,7 @@
      }
    }
    ```
-   - `scriptPath` 是**插件根相对路径**,指向上方那个预置脚本,原样照抄、不要改。
+   - `scriptPath` 把示例里的 `<插件根>` 替换成系统提示词注入的「插件根」实际值,拼上 `/workflows/interior-layout.workflow.js`,**必须是绝对路径,不要写成相对路径**(相对路径 SDK 按项目目录解析、找不到脚本)。
    - `args.n` 可省(由 workflow 按 Step3 `proposedN` 自适应,软上限 4、默认 3)。
 
    拉起后 workflow 自己跑完感知→规划推演→多方案→落地→评审→裁决→精修七步并落盘;你只需把它的最终返回转述给用户,**不要插手中间步骤、不要自己写脚本**。
