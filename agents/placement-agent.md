@@ -39,6 +39,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - 判断本变体方向**是否需要内部分区**（依入场知识与方案草稿的分区思维）：决定 `leafCount`（`0` 或 `1` = 不建叶子；`>1` = 建 `dz_1..n`）。
 - 调 `mcp__interior-layout__register_variant({ designZoneId, slug, visible: false, leafCount, summary: variantDirection })` 建目录骨架（`_{slug}/DESIGN.md` + 按 leafCount 建 `{slug}/zones.json` 占位 + 叶子 `modules.json` 骨架）。返回的 `leafPaths` 是各叶子 modules.json 路径，后续写模块用。
 - **必须保留** register 写入的 `schemeMetadata.summary`。
+- **【必须·真因⑤禁探针绕行】**若 `register_variant`（或后续任一 MCP 工具）返回错误（`isError`），**禁止**写 `test.txt` / `zz_test.txt` 等探针文件去试探文件系统是否可写、也禁止重命名/反复重试绕行。**立即停止本变体并返回结构化错误**（说明哪一步的哪个工具报了什么错），把失败如实交回编排层处置，不靠自造文件假装"环境正常"继续。register 没成功建出目录骨架，后续写盘必然落到错误位置。
 
 ## Step B：（按需）填 per-scheme zones.json（迁移 generate-zoning 步骤3 数据层）
 
@@ -99,6 +100,12 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 **坐标计算**：写入前先用 `zone boundaries` / `passage` / `exclusions` 过滤候选坐标 → 按墙面归属与边界算精确坐标 → 按朝向算 facing → 按模块尺寸算 bounds。**【必须】**`validate_layout` 只做编译验证与修正触发，**不承担第一次发现几何事实的职责**。
 
+**【必须·真因⑥轴向映射，修床深度混淆】**把模块尺寸算成 bounds 时，**沿墙方向取模块 `width`、垂直墙面方向取模块 `depth`**——二者不可轴向混用。判定垂直墙面方向 = 模块 `facing`（朝向房间内部的法线）所指的轴：
+- 靠**西墙**、facing 朝东（`semantic:"east"`，`value≈[1,0]`）：模块占 `X ∈ [anchorX, anchorX + depth]`、`Y` 方向铺 `width`。床 `depth=2100` 时 X 终点 = `anchorX + 2100`，**不是 `anchorX + width(1800)`**。
+- 靠**南墙**、facing 朝北（`semantic:"north"`，`value≈[0,1]`）：模块占 `Y ∈ [anchorY, anchorY + depth]`、`X` 方向铺 `width`。东墙/北墙同理按法线轴对应。
+
+锁定坐标前**核对** bounds 在垂直墙面方向的实际跨度 == 简报写的该模块 `depth`、沿墙跨度 == `width`；若 bounds 与简报的尺寸等级/深度自相矛盾（如床 X 跨度只有 1800 却标 2100 深床），这是轴向算错，必须改对后再写，不得让 modules.json 与施工简报互相打架。
+
 **写入位置（硬约束）**：模块只写入**目标叶子分区**的 `modules.json`（`{slug}/{leaf}/modules.json` 或单叶子 `{slug}/modules.json`，路径取自 register 返回的 `leafPaths`）。**【禁止】**写入 `schemes/modules.json`、容器分区或根级 `modules.json` —— 会导致"0 个模块，0 个错误"的假成功。
 
 **写入工具与形态**：用 `Write` / `Edit` 直接编辑 `modules.json`，形态为 wrapper `{schemeMetadata: {summary}, modules: [...]}`，**必须保留 register 写入的 `schemeMetadata.summary`**（误删会让 Web 端变体 tooltip 丢失设计意图）。模块字段：
@@ -128,6 +135,8 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - **语义级改图（不能静默执行）**：跨墙面迁移 / 增删合同家具 / 侵占保留留白 / 改关键邻接或分区意图 / 缩短满墙窗帘 / 降级主家具尺寸等级 / 压缩衣柜等级或破坏"填满有效段"。**自主模式下停止自动落地，统一记 `[自动改图建议]`，不得降格为 `[自动适配]`，不得为追求 0 error 而静默改图。**
 
 **【必须·真因 验证闸门】**验证报告中的模块总数必须与本轮目标叶子文件中的模块总数一致；若本轮写入了模块但验证显示 `0 个模块`，**这是路径错误，不是验证通过**——必须重新解析叶子分区路径并写入正确文件，**禁止汇报成功**。
+
+**【必须·真因 窗侧锚坐标自检】**双床头柜分支（睡眠组贴窗侧锚）落位后，锁定坐标前必须做一次坐标自检：取窗帘占位结束线坐标与窗侧床头柜的贴窗边坐标，核 `gap == 0mm`（沿采光轴方向：南窗则比 `窗帘 Y_max` 与 `窗侧床头柜 Y_min`；东/西窗则比对应 X 坐标）。**gap > 0 即窗侧空段违规**（对应 bedroom.md 第 113/298-300 行的"睡眠组居中"反例），必须把睡眠组整体重排贴回窗侧锚（窗帘→窗侧柜 gap=0→床→使用侧柜），剩余墙段只允许留在使用侧。**禁止**保留该空段、更禁止在施工简报里用"窗前通行留白 / 窗前缓冲"之类措辞把它合理化——窗帘盒与床之间的空段是无功能空段，不是有意留白。
 
 ## 真因⑤合同同步（收尾）
 
