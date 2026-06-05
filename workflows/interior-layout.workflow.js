@@ -165,7 +165,7 @@ function judgePrompt(candidates, excluded){
   const exc = (excluded && excluded.length)
     ? `\n【已被采纳闸门打回、不得再选】：${excluded.join('、')}（这些方案无法转正/采纳，从候选中剔除）。` : ''
   return `${base}\n原始用户诉求：${userRequest || '（见父 DESIGN.md 战略简报）'}\n候选变体：\n${ctx}${exc}\n` +
-    `读各候选评审结论（${candidates.map(c => `_${c.slug}/DESIGN.md`).join('、')}）+ 父 DESIGN.md 用户喜好，选出最优并调 adopt_variant 采纳；返回结构化判决。`
+    `读各候选评审结论（${candidates.map(c => hiddenDesign(c.slug)).join('、')}）+ 父 ${parentDesign} 用户喜好，选出最优并调 adopt_variant 采纳；返回结构化判决。`
 }
 function judgeDegeneratePrompt(slug){
   return `${base}\n仅有唯一候选变体 slug=${slug}（N=1 退化路径，无需选拔），直接调 adopt_variant 采纳它；返回结构化判决，winner=${slug}。`
@@ -180,7 +180,7 @@ function refinePrompt(slug){
 // 采纳收口核验（verify-agent，只报事实）：探测转正态 → 未满足补调 adopt_variant → 回读校验
 function adoptVerifyPrompt(slug){
   return `${base}\n你是采纳收口核验分身（只报事实，不做设计判断、不决定重挑/跳过）。胜者 slug=${slug}。\n` +
-    `① Glob schemes/${designZoneId}/ 探测：转正目录「${slug}」（无 _ 前缀）是否存在、隐藏目录「_${slug}」是否仍在；Read 父 DESIGN.md（schemes/${designZoneId}/DESIGN.md）首部 frontmatter 取 adopted。\n` +
+    `① Glob schemes/${designZoneId}/ 探测：转正目录「${slug}」（无 _ 前缀）是否存在、隐藏目录「_${slug}」是否仍在；Read 父 DESIGN.md（${parentDesign}）首部 frontmatter 取 adopted。\n` +
     `② 若未真转正（转正目录缺失 或 adopted≠${slug}）：以 function-calling 调 adopt_variant({ designZoneId:"${designZoneId}", winnerSlug:"${slug}" }) 补做（幂等可重入）。\n` +
     `③ 回读校验：再次确认转正目录存在 + 父 DESIGN.md frontmatter adopted 的真实值。\n` +
     `返回 { adoptedSlug:回读到的真实 adopted（无则空串）, promoted:转正目录是否存在, repaired:本次是否补调过 adopt_variant }。`
