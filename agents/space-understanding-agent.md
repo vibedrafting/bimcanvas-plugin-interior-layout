@@ -34,7 +34,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 派发包给出 `designZoneId`。依次：
 
-1. `mcp__canvas__canvas_vision` —— 取当前户型视觉证据。**【截图口径·禁 room 模式】**`designZoneId`（`rz_*`/`dz_*`）是 **zone id 非物理房间 id**——`viewport.mode=room`/`roomId` 只查 `baseline.rooms`，传 zone id 必报 `Room not found`。统一用 `targetId:"<designZoneId>"` 或 `viewport:{mode:"zone", zoneId:"<designZoneId>"}`。
+1. `mcp__canvas__canvas_vision`（**识图模式·传 prompt**）—— 取当前户型的**文字视觉证据**（deepseek 无 vision，只截图看不了；传 `prompt` 让 aoment 后端返文字 `resultText`）。**【截图范围口径·禁 room 模式】**`designZoneId`（`rz_*`/`dz_*`）是 **zone id 非物理房间 id**——`viewport.mode=room`/`roomId` 只查 `baseline.rooms`，传 zone id 必报 `Room not found`。传 `projectPath` + `prompt` + `targetId:"<designZoneId>"` 或 `viewport:{mode:"zone", zoneId:"<designZoneId>"}`。图源与截图范围二选一，同传报错。
 2. `mcp__interior-layout__get_zone_boundaries({ zoneIds: [designZoneId] })` —— 取设计区与边界/passage 几何。
 3. 通过 `Skill` 工具加载 `load-design-knowledge`（`level: L2`，`roomType` 按设计区房间类型），获取 `design_evaluation.md` 的品质维度作为空间阅读的判据来源。
 
