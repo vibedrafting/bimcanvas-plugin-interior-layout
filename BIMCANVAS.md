@@ -22,7 +22,7 @@
 
 1. **解析设计区** `designZoneId`(设计区节点 path,可多段如 `rz_6/dz_客厅`)。若用户未明确指向单一设计区,先问清是哪个设计区,不要替用户臆断。
 2. **收集 `originalUserRequest`**(用户本轮原始诉求原文)。
-3. **注入评审维度 `dimensions`**:把设计品质五维(取自知识层 `design_evaluation.md` 的维度名)作为**字符串列表**传入 `args.dimensions` —— 五维名单是路由层已知的稳定常量;workflow 只迭代不解释,维度判据仍在知识层。
+3. **注入评审维度 `dimensions`**:把设计品质六维(取自知识层 `design_evaluation.md` 的维度名)作为**字符串列表**传入 `args.dimensions` —— 六维名单是路由层已知的稳定常量;workflow 只迭代不解释,维度判据仍在知识层。
 4. **吐一个 `Workflow` 工具调用,拉起插件预置脚本**(如同调 Skill/Task)。
 
    **🔴 铁律(违反必出错,务必照做):**
@@ -37,7 +37,7 @@
      "args": {
        "designZoneId": "rz_3",
        "originalUserRequest": "为主卧设计最优布局",
-       "dimensions": ["动线设计", "空间意图", "功能叙事", "空间节奏", "采光通风"],
+       "dimensions": ["动线设计", "空间意图", "功能叙事", "空间节奏", "采光通风", "家具最优布局"],
        "scenario": "scene1"
      }
    }

@@ -6,7 +6,7 @@ export const meta = {
     { title: '规划推演', detail: '分区思维 ∥ 顺序思维，双轴出方案草稿' },
     { title: '多方案生成', detail: '消化双草稿，发散 N 个方向变体（含多样性护栏）' },
     { title: '多方案落地', detail: 'N 路并行落地：注册变体 + 施工简报 + 施工 + validate' },
-    { title: '多维评审', detail: '每变体 5 单维 + 1 通用评审，与落地 pipeline 重叠' },
+    { title: '多维评审', detail: '每变体多单维 + 1 通用评审（只报明显问题，无则通过），与落地 pipeline 重叠' },
     { title: '裁决', detail: '聚合评审选最优，采纳胜者（翻指针 + 去 _ 前缀）' },
     { title: '精修', detail: '对采纳方案做固定 1 轮精修' },
   ],
@@ -46,26 +46,35 @@ const OVERVIEW_SCHEMA = {  // Step3 返回
       properties: { candidate: { type: 'string' }, reason: { type: 'string' } } } },
   },
 }
-const CRITIC_SCHEMA = {  // Step5 单维 + 通用共用，dimension 区分；Layer1.5 用 generalChecks
-  type: 'object', required: ['dimension', 'score', 'layer1Fail', 'directionRespecting', 'findings'],
+const CRITIC_SCHEMA = {  // Step5 单维 + 通用共用，dimension 区分；去打分：只报该维明显问题，无问题=直接通过
+  type: 'object', required: ['dimension', 'hasIssue', 'layer1Fail', 'directionRespecting', 'issues'],
   properties: {
     dimension: { type: 'string' },                     // 维度之一 或 '__general__'
-    score: { type: 'number' },                         // 0–100；Layer1 硬伤直接不及格
+    hasIssue: { type: 'boolean' },                     // 该维是否发现明显问题；false = 直接通过（不强行凑优点）
     layer1Fail: { type: 'boolean' },                   // 工程合规硬伤（validate 已过仍兜底）
-    directionRespecting: { type: 'boolean' },          // 建议是否在既定方向内（防裁判把"换方向"当扣分）
-    findings: { type: 'array', items: { type: 'string' } },     // 接地问题/亮点，带证据
-    suggestions: { type: 'array', items: { type: 'string' } },  // 每条标 strategy级/placement级
+    directionRespecting: { type: 'boolean' },          // 评审是否在既定方向内（防裁判把"换方向"当缺陷）
+    issues: { type: 'array', items: { type: 'object', required: ['desc', 'severity'],   // 只列明显问题，无则空数组
+      properties: {
+        desc: { type: 'string' },                                // 明显问题描述
+        evidence: { type: 'string' },                            // 坐标/截图证据
+        severity: { type: 'string', enum: ['硬违规', '明显', '轻微'] },  // 硬违规=layer1Fail/【必须】级✗
+      } } },
     generalChecks: { type: 'object',                            // 仅 __general__ 填
       properties: { againstWall: { type: 'boolean' }, adjacentGap: { type: 'boolean' }, alignment: { type: 'boolean' } } },
   },
 }
-const JUDGE_SELECT_SCHEMA = {  // Step6 裁决
-  type: 'object', required: ['winner', 'rankedSlugs', 'rationale'],
+const JUDGE_SELECT_SCHEMA = {  // Step6 裁决：去打分，缺陷最少/最轻者胜（硬违规优先于明显数）
+  type: 'object', required: ['winner', 'ranking', 'rationale'],
   properties: {
     winner: { type: 'string' },
-    rankedSlugs: { type: 'array', items: { type: 'object', required: ['slug', 'score'],
-      properties: { slug: { type: 'string' }, score: { type: 'number' }, oneLineReason: { type: 'string' } } } },
-    rationale: { type: 'string' },                     // 判据来自知识层，不在 prompt 复述
+    ranking: { type: 'array', items: { type: 'object', required: ['slug', 'defects'],   // 按缺陷少→多排序
+      properties: {
+        slug: { type: 'string' },
+        defects: { type: 'array', items: { type: 'object',          // 该变体未化解缺陷清单（空数组=无缺陷）
+          properties: { dim: { type: 'string' }, desc: { type: 'string' }, severity: { type: 'string', enum: ['硬违规', '明显', '轻微'] } } } },
+        oneLineReason: { type: 'string' },
+      } } },
+    rationale: { type: 'string' },                     // 文字客观优缺点对比 + 缺陷最少判定；判据来自知识层，不复述
   },
 }
 const JUDGE_REFINE_SCHEMA = {  // Step7 精修判决（optimization 返回）
@@ -136,18 +145,26 @@ function overviewBlock(ov){
     (exc.length ? `\n\n### 自动排除\n${exc.join('\n')}` : '')
 }
 function reviewBlock(slug, reviews){
-  const items = (reviews || []).map(r =>
-    `- **${r.dimension}**：score=${r.score}` +
-    `${r.layer1Fail ? ' ⚠layer1Fail' : ''}${r.directionRespecting === false ? ' [非既定方向建议]' : ''}\n` +
-    `  - findings：${(r.findings || []).join('；') || '无'}\n` +
-    `  - suggestions：${(r.suggestions || []).join('；') || '无'}` +
-    (r.dimension === GENERAL && r.generalChecks && Object.keys(r.generalChecks).length
-      ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''))   // 3.1：仅 __general__ 维渲染，空对象 {} 也滤掉
+  const items = (reviews || []).map(r => {
+    const head = `- **${r.dimension}**：${r.hasIssue ? '发现问题' : '通过'}` +
+      `${r.layer1Fail ? ' ⚠layer1Fail' : ''}${r.directionRespecting === false ? ' [非既定方向建议]' : ''}`
+    const issues = (r.issues || []).length
+      ? '\n' + r.issues.map(i => `  - [${i.severity || '明显'}] ${i.desc}${i.evidence ? `（${i.evidence}）` : ''}`).join('\n')
+      : '\n  - 无明显问题'
+    const gc = (r.dimension === GENERAL && r.generalChecks && Object.keys(r.generalChecks).length)
+      ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''   // 仅 __general__ 维渲染，空对象 {} 也滤掉
+    return head + issues + gc
+  })
   return `## 评审结论\n\n${items.join('\n')}`
 }
 function verdictBlock(v){
-  const ranked = (v?.rankedSlugs || []).map(r => `- ${r.slug}：score=${r.score}${r.oneLineReason ? `（${r.oneLineReason}）` : ''}`)
-  return `## 最终裁决\n\n- 胜者：**${v?.winner || ''}**\n\n### 排名\n${ranked.join('\n')}\n\n### 裁决理由\n${v?.rationale || ''}`
+  const ranked = (v?.ranking || []).map(r => {
+    const defects = (r.defects || []).length
+      ? r.defects.map(d => `[${d.severity || '明显'}]${d.dim ? `${d.dim}:` : ''}${d.desc}`).join('；')
+      : '无缺陷'
+    return `- ${r.slug}：${defects}${r.oneLineReason ? `（${r.oneLineReason}）` : ''}`
+  })
+  return `## 最终裁决\n\n- 胜者：**${v?.winner || ''}**\n\n### 各方案缺陷\n${ranked.join('\n')}\n\n### 裁决理由\n${v?.rationale || ''}`
 }
 
 // ── prompt builder（薄拼接：只塞 id / 维度 / 上游 return，不含业务判断）──
