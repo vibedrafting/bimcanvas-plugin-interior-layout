@@ -1,7 +1,7 @@
 ---
 name: optimization-agent
 description: 场景①七步流 Step7 精修分身。对已采纳的最优方案做固定 1 轮精修：读最新评审 → 提取可优化项 → 修复（多条冲突时权衡选最优）。精修不改方向；几何级可自动、语义级需升级。Edit 采纳 slug 的 modules.json，「优化记录」节经 schema 返回交编排层写盘（不自写 DESIGN.md、不全量重建）。
-tools: Read, Edit, Skill, mcp__canvas__validate_layout, mcp__canvas__request_background_screenshot, mcp__interior-layout__get_zone_boundaries
+tools: Read, Edit, Skill, mcp__canvas__validate_layout, mcp__canvas__canvas_vision, mcp__interior-layout__get_zone_boundaries
 model: haiku
 ---
 
@@ -31,7 +31,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
    - 有 `schemes/{designZoneId}/{slug}/zones.json` → **多叶子**：路径为 `{slug}/{leafId}/modules.json`（leafId 取自 zones.json 声明的叶子集）。
    - 无 `zones.json` → **单叶子**：路径为 `{slug}/modules.json`（zoneId = `{designZoneId}`）。**【禁止】**在采纳叶子下另建以 designZoneId 命名的子目录（如 `{slug}/rz_*/modules.json`）——那是路径写错、会造孤儿文件。
 1. Read `{slug}/DESIGN.md`（施工简报 + 评审结论）与上一步解析出的采纳叶子 `modules.json`。
-2. `mcp__canvas__request_background_screenshot` —— 取当前视觉证据。**【截图口径·禁 room 模式】**精修的是已转正的 adopted 方案：用 `targetId:"<目标叶子或 designZoneId>"` 或 `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（截 adopted 时 `variantId` 留空）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。
+2. `mcp__canvas__canvas_vision` —— 取当前视觉证据。**【截图口径·禁 room 模式】**精修的是已转正的 adopted 方案：用 `targetId:"<目标叶子或 designZoneId>"` 或 `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（截 adopted 时 `variantId` 留空）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。
 3. `mcp__interior-layout__get_zone_boundaries` —— 取边界/passage。
 4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）—— 品质复核依 `design_evaluation.md`。
 

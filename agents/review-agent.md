@@ -1,7 +1,7 @@
 ---
 name: review-agent
 description: 场景①七步流 Step5 多维评审分身（参数化）。按 dimension 参数审一个变体的一个维度——6 个设计品质单维（动线设计/空间意图/功能叙事/空间节奏/采光通风/家具最优布局）或 1 个通用维（靠墙/相邻空隙/对齐）。**只找该维明显问题、无问题直接通过**（去打分，不强行分析优点）；只读 + 截图，判据交知识层不在 prompt 复述，返回结构化问题清单；不写盘。
-tools: Read, Skill, mcp__canvas__request_background_screenshot, mcp__interior-layout__get_zone_boundaries
+tools: Read, Skill, mcp__canvas__canvas_vision, mcp__interior-layout__get_zone_boundaries
 model: haiku
 ---
 
@@ -41,7 +41,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 入场动作
 
-1. `mcp__canvas__request_background_screenshot` —— 取该变体当前视觉证据。**【截图口径·禁 room 模式】**评审候选变体（`_{slug}`）：必须传 `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 会报错）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式必报 `Room not found`。
+1. `mcp__canvas__canvas_vision` —— 取该变体当前视觉证据。**【截图口径·禁 room 模式】**评审候选变体（`_{slug}`）：必须传 `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 会报错）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式必报 `Room not found`。
 2. Read 目标变体 `_{slug}/{leaf}/modules.json` 与 `_{slug}/DESIGN.md`（含施工简报，了解既定方向）。
 3. `mcp__interior-layout__get_zone_boundaries` —— 取边界/passage/exclusions。
 4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）。**判据来自 `design_evaluation.md`，不在本 prompt 复述**。

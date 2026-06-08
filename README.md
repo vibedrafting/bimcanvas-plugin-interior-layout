@@ -78,8 +78,7 @@
 |---|---|
 | `mcp__canvas__load_artifact` | 通用只读 artifact(`modules` / `zones` / domain kinds);按 `path` 读单区(裸 zoneId 自动解析 adopted 指针)或留空聚合 |
 | `mcp__canvas__validate_layout` | 几何 / 碰撞 / 边界验证(委派 active plugin 的 `validators/` 脚本) |
-| `mcp__canvas__request_background_screenshot` | 画布截图(critic 接地看真实布局) |
-| `mcp__canvas__analyze_image` | 图像分析 |
+| `mcp__canvas__canvas_vision` | 截图 / 识图(aoment) / 截图+识图 三模式自动判断(无 prompt=只截图;prompt+图源=只识图;prompt+截图范围=截图+识图) |
 
 > `modules.json` 由 Agent 用 `Write` / `Edit` 工具直接编辑(保留外层 `schemeMetadata.summary` 字段),无专用写入 MCP 工具。
 > 变体目录由 Agent 用 `Write` 直接建、用 `Bash mv` 转正/翻指针——平台不再提供 `register_variant` / `list_variants` MCP 工具(列方案 = `Glob schemes/{zoneId}/*/`,生效 = 读父 `DESIGN.md` 的 `adopted`)。
