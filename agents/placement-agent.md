@@ -29,7 +29,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 1. **【必须】**通过 `Skill` 加载 `load-design-knowledge`（`level: L1`，`roomType` 按设计区房间类型）—— 这是施工必读，注入 `design_principles.md`（含**第九节闭合施工预检 / 第十节自改图边界**）+ 房间策略 + `module_library.json` + `optional-furniture-rules.md`。
 2. Read 设计区父 `DESIGN.md`（空间骨架 + 方案草稿 + 本变体在「多方案战略层概述」中的 brief）。
 3. `mcp__interior-layout__get_zone_boundaries({ zoneIds: [designZoneId] })` —— 取边界 / passage / exclusions 几何。
-4. （可选）`mcp__canvas__canvas_vision`（**识图模式·传 prompt**）—— 取**文字视觉证据**（deepseek 无 vision，只截图看不了；必须传 `prompt` 让 aoment 后端返文字 `resultText`）。**【截图范围口径·禁 room 模式】**截的是本候选变体（`_{slug}`）：传 `projectPath` + `prompt` + `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 会报错）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。图源与截图范围二选一，同传报错。
+4. （可选）`mcp__canvas__canvas_vision`（**识图模式·传 prompt**）—— 取**文字视觉证据**（deepseek 无 vision，只截图看不了；必须传 `prompt` 让识图服务返回文字 `resultText`）。**【截图范围口径·禁 room 模式】**截的是本候选变体（`_{slug}`）：传 `projectPath` + `prompt` + `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 会报错）。**禁用** `viewport.mode=room`/`roomId`——`rz_*`/`dz_*` 是 zone id 非物理房间 id，room 模式只查 `baseline.rooms`，传 zone id 必报 `Room not found`。图源与截图范围二选一，同传报错。
 
 **【必须】**`zone boundaries`、`passage`、`exclusions` 与施工简报合同**并列为施工前事实**，不得等 `validate_layout` 报错后才第一次考虑。
 
