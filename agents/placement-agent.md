@@ -24,7 +24,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 入场动作
 
-派发包给出 `designZoneId`、本变体 `slug` 和 `variantContext`（四字段方向 hint：`variantDirection` / `variantNarrative` / `variantAnchorSeed` / `variantAvoidance`，来自 Step3「多方案战略层概述」）。
+派发包给出 `designZoneId`、本变体 `slug` 和 `variantContext`（`variantDirection` / `variantNarrative` / **`wallPlan`**，来自 Step3「多方案战略层概述」）。**`wallPlan` = 本变体定义性主家具的墙面归属（既定布局骨架），是你的施工合同骨架**：主家具按 `wallPlan` 落到指定墙、**不得擅自改墙**（要改属语义级改图，停下上报 `[自动改图建议]`）；附属 / 可选 / 跟随家具（床头柜 / 窗帘 / 梳妆台等）由你按方案草稿 + 房间策略补全；该墙有效段填满、坐标、模块阵列、留白等**细节由你优化**（双候选评估 / L 形门槛 / 阵列填满 / 闭合预检在 `wallPlan` 内激活）。
 
 1. **【必须】**通过 `Skill` 加载 `load-design-knowledge`（`level: L1`，`roomType` 按设计区房间类型）—— 这是施工必读，注入 `design_principles.md`（含**第九节闭合施工预检 / 第十节自改图边界**）+ 房间策略 + `module_library.json` + `optional-furniture-rules.md`。
 2. Read 设计区父 `DESIGN.md`（空间骨架 + 方案草稿 + 本变体在「多方案战略层概述」中的 brief）。
@@ -59,9 +59,6 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 **【必须·禁注入 frontmatter】**写 `_{slug}/DESIGN.md` 时，正文起首必须是 **markdown 标题**（register 写出的骨架首行恒为 `# 方案设计说明`，保留它）。**绝不**在文件顶部注入任何 YAML frontmatter（`---\nschemeMetadata:\n  summary: ...\n---`）——`summary` 的唯一来源是 `modules.json` 的 `schemeMetadata.summary`，DESIGN.md 再写一份会构成双源冲突。
 > ❌ 反例：整体重写简报时图省事在文件顶端补 `--- schemeMetadata: summary: "..." ---`。✅ 正确：只 upsert `## 施工简报` 等正文节，文件首行始终是 `# 方案设计说明`，无 frontmatter。
-
-**【必须·R4-2 自由主家具墙面穷举重判】**对**未被 `variantContext.variantAnchorSeed` 直接锚定**的主家具（尤其衣柜），写施工简报锁定其墙面前**必须重新穷举所有候选墙、选最长有效连续段并填满**（穷举/选最长/填满判据见 `bedroom.md`，已由 Skill-L1 注入）——**不得默认沿用父 `DESIGN.md` 草稿/分区思维预设的墙段**。连续实墙跨主体区+延伸区时按**整段**评估利用，不被分区人为切断。`variantAnchorSeed` 已锚定的家具按 anchor 执行，不在此列。据此重判的结果即下文扣减账本的"原始墙段"（= 穷举选出的最长有效段，非草稿 narrative 限定段）。
-> WHY：`variantAnchorSeed` 只锁 1 个核心决策点，其余主家具（含衣柜）被留为"自由"。自由家具若直接沿用草稿预设墙段，会丢失"最重要家具得最优墙"——把房间最长连续无窗实墙闲置或让给低优先功能（这正是北墙衣柜缩水的真因：anchor 锚床、衣柜留自由、却跌回草稿的 NE 小墙段）。穷举重判让自由衣柜重新落到最优墙。
 
 **【必须·真因②主家具扣减账本】**主家具条目必须写明关键尺寸推导：**原始墙段、扣减项、有效段、选择该模块/尺寸等级的理由**。若没有扣减，写"扣减项：无"。这不是坐标明细，而是让施工不再重新解释规则适用范围。
 

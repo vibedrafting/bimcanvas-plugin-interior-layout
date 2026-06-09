@@ -26,21 +26,21 @@ function clampN(raw){ const n = Math.max(1, raw || 3); return Math.min(n, 4) }  
 let N = clampN(args?.n)
 
 // ── 结构化输出 schema（4 个）─────────────────────────────────────
-// 【契约·三处同名钉死】Step3 变体字段短名（direction/narrative/anchorSeed/avoidance/anchorSeedType）
+// 【契约·三处同名钉死】Step3 变体字段短名（direction/narrative/wallPlan）
 // 必须三处一致：① 本 OVERVIEW_SCHEMA 属性名 ② multi-plan-agent.md 产出字段名 ③ 下方 vcOf 读取的 v.* 短名。
 // vcOf 负责把短名映射回 placement 用的长名（variantDirection 等），勿在 agent 侧改回长名。
-const OVERVIEW_SCHEMA = {  // Step3 返回
+// 变体相异性 = wallPlan(定义性主家具墙面归属)两两不同。【房型中立】"哪些是定义性主家具"由 agent 按房型策略判定，
+// 本脚本只比对不透明 wallPlan 签名，绝不内嵌任何家具/墙名（卧室=床+衣柜、卫生间=台盆+淋浴…均由 agent 决定）。见 diverseEnough。
+const OVERVIEW_SCHEMA = {  // Step3 返回：每变体一份相对完整的主家具墙面归属布局
   type: 'object', required: ['variants', 'proposedN'],
   properties: {
-    proposedN: { type: 'number' },                     // 驱动自适应收敛
-    variants: { type: 'array', items: { type: 'object', required: ['slug', 'direction', 'anchorSeedType'],
+    proposedN: { type: 'number' },                     // = 去重后实质不同的可行布局数（不强凑、不重复）
+    variants: { type: 'array', items: { type: 'object', required: ['slug', 'direction', 'wallPlan'],
       properties: {
         slug: { type: 'string' },
-        direction: { type: 'string' },
-        narrative: { type: 'string' },
-        anchorSeed: { type: 'string' },
-        avoidance: { type: 'string' },
-        anchorSeedType: { type: 'string', enum: ['single-furniture', 'combination', 'spatial-strategy'] },
+        direction: { type: 'string' },                 // 一句话设计理由
+        narrative: { type: 'string' },                 // 该布局为何值得探索
+        wallPlan: { type: 'string' },                  // 定义性主家具的墙面归属（房型主家具，agent 按房型策略判定）——相异性查重键 + placement 落地骨架
       } } },
     excluded: { type: 'array', items: { type: 'object',
       properties: { candidate: { type: 'string' }, reason: { type: 'string' } } } },
@@ -139,7 +139,7 @@ async function writeSections(path, blocks, phaseName){
 // ── 结构化返回 → markdown 块（纯机械拼接 agent 产出的文本，无业务判断）──
 function overviewBlock(ov){
   const lines = (ov?.variants || []).map(v =>
-    `- **${v.slug}**（${v.anchorSeedType}）：${v.direction || ''}\n  - 叙事：${v.narrative || ''}\n  - 锚点：${v.anchorSeed || ''}\n  - 规避：${v.avoidance || ''}`)
+    `- **${v.slug}**：${v.direction || ''}\n  - 墙面归属：${v.wallPlan || ''}\n  - 叙事：${v.narrative || ''}`)
   const exc = (ov?.excluded || []).map(e => `- 排除「${e.candidate}」：${e.reason || ''}`)
   return `## 多方案战略层概述\n\n${lines.join('\n')}` +
     (exc.length ? `\n\n### 自动排除\n${exc.join('\n')}` : '')
@@ -237,25 +237,28 @@ await writeSections(parentDesign, ['## 方案草稿', zoningSec, seqSec], '规�
 phase('多方案生成')
 async function genOverview(retryNote){
   return agent(
-    `${base}\n你是 Step3 多方案生成分身，消化双草稿发散方向变体，返回结构化 overview（含 proposedN、每变体 anchorSeedType）。` +
+    `${base}\n你是 Step3 多方案生成分身，消化双草稿发散出 N 份【相对完整的主家具墙面归属布局】，返回结构化 overview（含 proposedN、每变体 wallPlan）。wallPlan = 本房型定义性主家具的墙面归属（卧室=床+衣柜、卫生间=台盆+淋浴等，按房型策略判定）；各变体 wallPlan 必须两两不同（同墙面归属=同方案）；proposedN = 去重后实质不同的可行布局数，不足 3 不强凑、不重复。` +
     `${retryNote || ''}`,
     { agentType: 'multi-plan-agent', schema: OVERVIEW_SCHEMA, label: 'multiplan', phase: '多方案生成' })
 }
-// 红线15：多样性护栏必须在【落地集】上校验。先收敛 N → slice → 在 sliced 集上验类型≥2，
-// 否则 variants 数 > N 时（如 proposedN>4 被 clamp 到 4）护栏在全集通过、落地的前 N 个却可能全同类型。
+// 红线15：相异性护栏必须在【落地集】上校验。先收敛 N → slice → 在 sliced 集上验核心墙组合两两不同，
+// 否则 variants 数 > N 时护栏在全集通过、落地的前 N 个却可能雷同。
 function pickN(ov){ return Math.min(clampN(args?.n || ov?.proposedN), 4) }
 function chooseVariants(ov){ return (ov?.variants || []).slice(0, pickN(ov)) }
-function diverseEnough(vs){ return new Set(vs.map(v => v.anchorSeedType)).size >= 2 }
+// 相异性 = wallPlan(定义性主家具墙面归属)两两不同；同 wallPlan=同一方案，不论叙事。
+// 【房型中立】只比对不透明签名（归一化去空白），不内嵌任何家具/墙名——卧室/卫生间/客厅通用。
+function layoutKey(v){ return (v.wallPlan || '').replace(/\s+/g, '') }
+function diverseEnough(vs){ return new Set(vs.map(layoutKey)).size === vs.length }
 
 let overview = await genOverview()
 let chosen = chooseVariants(overview)
 if (chosen.length > 1 && !diverseEnough(chosen)) {
-  log('多样性护栏未过（落地集 anchorSeedType 类型 < 2），要求重出 1 次')
-  const re = await genOverview('上一轮入选（系统只采用前 N 个）变体的 anchorSeedType 类型不足 2 种，请保证类型至少跨 2 种重出。')
+  log('相异性护栏未过（落地集 wallPlan 有雷同），要求去重重出 1 次')
+  const re = await genOverview('上一轮入选变体中有 wallPlan（定义性主家具墙面归属）雷同者——它们是同一方案。请让各变体的主家具墙面归属两两不同（换墙），或减少变体数（只报实质不同的布局，不补不重复）后重出。')
   const reChosen = chooseVariants(re)
-  overview = re; chosen = reChosen                       // N-9：无条件放行第二轮（最新重出版本），保留单次重试边界
+  overview = re; chosen = reChosen                       // 无条件放行第二轮（最新重出版本），保留单次重试边界
   if (!(reChosen.length <= 1 || diverseEnough(reChosen)))
-    log('重出后落地集类型仍 < 2，仍放行第二轮（避免死循环），由裁决阶段兜底')
+    log('重出后落地集仍有雷同，仍放行第二轮（避免死循环），由裁决阶段兜底')
 }
 await writeSections(parentDesign, [overviewBlock({ ...overview, variants: chosen })], '多方案生成')
 
@@ -265,7 +268,7 @@ N = variants.length
 const vcOf = {}
 for (const v of variants) vcOf[v.slug] = {
   variantDirection: v.direction, variantNarrative: v.narrative,
-  variantAnchorSeed: v.anchorSeed, variantAvoidance: v.avoidance,
+  wallPlan: v.wallPlan,
 }
 const slugs = variants.map(v => v.slug)
 if (!slugs.length) return { ok: false, reason: 'Step3 未产出任何变体' }
