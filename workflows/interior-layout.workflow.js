@@ -61,8 +61,6 @@ const CRITIC_SCHEMA = {  // Step5 评审：每变体 2 份——设计品质(整
         evidence: { type: 'string' },                            // 坐标/截图证据
         severity: { type: 'string', enum: ['硬违规', '明显', '轻微'] },  // 硬违规=layer1Fail/【必须】级✗
       } } },
-    generalChecks: { type: 'object',                            // 仅 通用品质 填
-      properties: { againstWall: { type: 'boolean' }, adjacentGap: { type: 'boolean' }, alignment: { type: 'boolean' }, spaceUsed: { type: 'boolean' } } },
   },
 }
 const JUDGE_SELECT_SCHEMA = {  // Step6 裁决：去打分，缺陷最少/最轻者胜（硬违规优先于明显数）
@@ -153,9 +151,7 @@ function reviewBlock(slug, reviews){
     const issues = (r.issues || []).length
       ? '\n' + r.issues.map(i => `  - [${i.severity || '明显'}]${i.dim ? ` ${i.dim}:` : ''} ${i.desc}${i.evidence ? `（${i.evidence}）` : ''}`).join('\n')
       : '\n  - 无明显问题'
-    const gc = (r.dimension === GENERAL && r.generalChecks && Object.keys(r.generalChecks).length)
-      ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''   // 仅 通用品质 维渲染，空对象 {} 也滤掉
-    return head + issues + gc
+    return head + issues
   })
   return `## 评审结论\n\n${items.join('\n')}`
 }
@@ -294,9 +290,9 @@ const reviewed = await parallel(slugs.map(slug => async () => {
   if (degenerate) return { slug, reviews: [] }   // N=1 退化：跳过多维评审选拔
   const reviews = await parallel([
     ...(DIMS.length ? [() => agent(designQualityPrompt(slug, DIMS, hiddenDesign(slug)),
-      { agentType: 'review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:设计品质`, phase: '多维评审' })] : []),
+      { agentType: 'design-review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:设计品质`, phase: '多维评审' })] : []),
     () => agent(generalQualityPrompt(slug, hiddenDesign(slug)),
-      { agentType: 'review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:通用品质`, phase: '多维评审' }),
+      { agentType: 'general-review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:通用品质`, phase: '多维评审' }),
   ])
   const ok = reviews.filter(Boolean)
   // 每 slug 评审落点 = 各自 _{slug}/DESIGN.md（不同文件，跨 slug 不竞态）
