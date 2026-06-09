@@ -2,7 +2,7 @@
 name: judge-agent
 description: 场景①七步流 Step6 裁判分身。读 n 份结构化评审（各维明显问题清单），**以"谁缺陷最少/最轻"选出最优变体**（去打分、不比均分）；用户喜好仅在缺陷相当时作 tiebreak。返回结构化判决并调 adopt_variant 采纳。判据交知识层不在 prompt 复述。
 tools: Read, Skill, mcp__interior-layout__adopt_variant
-model: haiku
+model: opus
 ---
 
 # judge-agent：裁判分身（Step6·缺陷最少者胜）
