@@ -24,17 +24,24 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 **【三层边界】**你只判上述四项客观品质：**不替 validate_layout 做几何 / 通道校验（Layer 1）、也不做设计品质判断（Layer 2，交 design-review-agent）**。**不复述通道 / 通行宽度**——发现通道问题交回 Layer 1，不在本维记 finding。
 
+## 验证手段（多模态 + 坐标交叉）
+
+每项检查**两路并用、交叉验证**：
+- **多模态识图**（`mcp__canvas__canvas_vision`，识图模式必传 `prompt`）：视觉 / 感知类问题（对齐、错位、截断、占压、空置、转角死角）**主要靠识图**——主 agent 无 vision、**绝不能只截图**，必须传 `prompt` 让识图服务把渲染图分析成 `resultText` 供判读；**按不同维度可多次调用、每次聚焦一项**取视觉证据。
+- **坐标级核验**：数值 / 几何类问题（间距、墙段长度、净空交叠、墙面归属）**主要靠坐标**（从 `modules.json` / `get_zone_boundaries` 直接算）。
+- **交叉**：两路一致则确认；**冲突以识图视觉为准**（截图反映真实渲染）；识图不可用（apiKey 未配 / 失败）时视觉类问题记 `[视觉验证缺失]`、**不得放行**，坐标类照常出 issue，**禁用坐标冒充视觉证据宣布达标**。
+- **【截图范围·禁 room 模式】**评候选变体（`_{slug}`）：传 `projectPath` + `prompt` + `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 报错）。**禁** `viewport.mode=room`/`roomId`（`rz_*`/`dz_*` 是 zone id 非房间 id，必报 `Room not found`）；**禁**同传图源与截图范围。
+
 ## 入场动作
 
-1. `mcp__canvas__canvas_vision`（**识图模式·必传 prompt**）—— **本分身以识图为主**，prompt **必须点名**让识图服务报「相邻家具是否对齐、**L 转角有无缝隙 / 错位 / 贴墙卫生死角**、家具端部是否贴墙到位、有无大块墙段或区域空置浪费（无显式留白理由）」，返回 `resultText` 作主要判据。**【截图范围·禁 room 模式】**评候选变体（`_{slug}`）：传 `projectPath` + `prompt` + `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 报错）。**禁** `viewport.mode=room`/`roomId`。**禁**同传图源与截图范围。
+1. `mcp__canvas__canvas_vision` 取视觉证据（用法见上节《验证手段》）；prompt **点名报**「相邻家具是否对齐、L 转角缝隙 / 错位 / 贴墙卫生死角、端部是否贴墙、有无大块空置（无显式留白理由）」。
 2. Read 目标变体 `_{slug}/{leaf}/modules.json` 与 `_{slug}/DESIGN.md`（了解既定留白意图，判"空置是否有显式理由"）。
 3. `mcp__interior-layout__get_zone_boundaries` —— 取边界 / passage（坐标佐证）。
 4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）。**判据来自 `design_evaluation.md`「Layer 1.5 通用品质」，不复述**。
 
 ## 关键触发器
 
-- **【必须·识图为主】**四项（靠墙 / 相邻空隙 / 对齐-转角闭合 / 空间利用）是**视觉感知问题，以 canvas_vision `resultText` 为主要判据**：据识图描述的家具错位、**L 转角缝隙 / 贴墙卫生死角**、端部未贴墙、大块空置出 issue（`dim` 取 `对齐` / `靠墙` / `相邻空隙` / `空间利用`，带视觉描述 + 可定位处，severity ≥ `明显`；转角死角 / 端部未贴墙 / 最长墙整段空置=典型 ✗）。**坐标仅作佐证、不设阈值（定性）**。
-- **【必须】识图降级（apiKey 未配 / 失败时）**：本分身核心依赖识图——识图不可用时，对齐 / 转角死角 / 错位等视觉项记 `[视觉验证缺失]`、**不得给"通过"**；仅"大块墙段空置"这类坐标能算的项用坐标兜底出 issue，**禁用坐标冒充视觉证据宣布达标**。
+- **【出 issue 口径】**`dim` 取 `对齐` / `靠墙` / `相邻空隙` / `空间利用`，带视觉描述 + 可定位处，severity ≥ `明显`；**转角死角 / 端部未贴墙 / 最长墙整段空置 = 典型 ✗**；定性、不设阈值。
 - **【severity 分级】**每个 issue 标 `severity`：`硬违规` / `明显` / `轻微`。
 - **directionRespecting**："建议换方向"的问题不是本变体缺陷——标 `directionRespecting=false`。
 

@@ -26,9 +26,17 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 **【边界】**你只判 Layer 2 设计品质；"靠墙 / 相邻空隙 / 对齐 / 空间利用"（Layer 1.5 通用品质）交 general-review-agent、"几何合法 / 通道宽度"（Layer 1）交 validate_layout，均不归你。
 
+## 验证手段（多模态 + 坐标交叉）
+
+每项检查**两路并用、交叉验证**：
+- **多模态识图**（`mcp__canvas__canvas_vision`，识图模式必传 `prompt`）：视觉 / 感知类问题（对齐、错位、截断、占压、空置、转角死角）**主要靠识图**——主 agent 无 vision、**绝不能只截图**，必须传 `prompt` 让识图服务把渲染图分析成 `resultText` 供判读；**按不同维度可多次调用、每次聚焦一项**取视觉证据。
+- **坐标级核验**：数值 / 几何类问题（间距、墙段长度、净空交叠、墙面归属）**主要靠坐标**（从 `modules.json` / `get_zone_boundaries` 直接算）。
+- **交叉**：两路一致则确认；**冲突以识图视觉为准**（截图反映真实渲染）；识图不可用（apiKey 未配 / 失败）时视觉类问题记 `[视觉验证缺失]`、**不得放行**，坐标类照常出 issue，**禁用坐标冒充视觉证据宣布达标**。
+- **【截图范围·禁 room 模式】**评候选变体（`_{slug}`）：传 `projectPath` + `prompt` + `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 报错）。**禁** `viewport.mode=room`/`roomId`（`rz_*`/`dz_*` 是 zone id 非房间 id，必报 `Room not found`）；**禁**同传图源与截图范围。
+
 ## 入场动作
 
-1. `mcp__canvas__canvas_vision`（**识图模式·必传 prompt**）—— 取该变体**文字视觉证据**。主 agent 跑 deepseek 无 vision，**绝不能只截图**；必须传聚焦设计维的 `prompt`，工具返回 `resultText` 供判读。**【截图范围·禁 room 模式】**评候选变体（`_{slug}`）：传 `projectPath` + `prompt` + `variantId:"_{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 报错）。**禁** `viewport.mode=room`/`roomId`（`rz_*`/`dz_*` 是 zone id 非房间 id，必报 `Room not found`）。**禁**同传图源与截图范围。
+1. `mcp__canvas__canvas_vision` 取视觉证据（用法见上节《验证手段》；**逐个设计维各调一次、聚焦该维**取视觉证据，再与坐标交叉）。
 2. Read 目标变体 `_{slug}/{leaf}/modules.json` 与 `_{slug}/DESIGN.md`（含施工简报，了解既定方向）。
 3. `mcp__interior-layout__get_zone_boundaries` —— 取边界 / passage / exclusions。
 4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）。**判据来自 `design_evaluation.md` 各设计维，不在本 prompt 复述**。
@@ -39,8 +47,6 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 - **判据交还知识层**：各维判据来自 `design_evaluation.md` 对应维度的"✗"标准，**不在本 prompt 重抄**——从 Skill 注入内容取。
 - **【severity 分级】**每个 issue 标 `severity`：`硬违规`（layer1Fail / 带数值阈值的坐标硬反例 / 知识层【必须】级✗）/ `明显` / `轻微`。
-- **【必须】识图文字为准**：以 canvas_vision `resultText` 为视觉证据；与 `modules.json` 不一致时以识图为准（窗帘截断、衣柜视觉偏小 / 最长墙是否真空、床体过度占压、留白是否有意）。
-- **【必须】识图降级（apiKey 未配 / 失败时）**：① 视觉级核查项记 `[视觉验证缺失]`、**不得给"通过"**；② 禁用坐标冒充视觉证据宣布达标；③ **坐标级核查不受影响**——门净空交叠 / 窗侧空段 / 家具最优墙段比对照常出 issue。
 - **【必须】定量硬反例必明确认定**：`design_evaluation.md` 带数值阈值的 ✗（如 <600mm 窄缝），证据可由坐标直接算出就**必须出 issue**（severity ≥ `明显`），不软化为"待确认"。
 - **【必须·`动线设计` 维：门净空交叠】**取各门净空禁区 `ez_*b`（`get_zone_boundaries` 的 exclusions）与各可选家具 `bounds` + 前向使用区（≥600mm）做矩形交叠，任一交叠 → issue（带坐标与 ez id，severity ≥ `明显`）。坐标可算，不受截图成败影响。
 - **【必须·`功能叙事` 维：窗侧空段】**若床头墙含窗，坐标算窗帘占位结束线与最近睡眠组构件贴窗边间距 >200mm → issue（应 gap=0，severity ≥ `明显`），不接受"窗前缓冲"措辞。
