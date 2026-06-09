@@ -2,7 +2,7 @@
 name: multi-plan-agent
 description: 场景①七步流 Step3 多方案生成分身。收割分区思维 + 顺序思维两份草稿已收敛的布局，去重并列成 N 份【相对完整的主家具墙面归属布局】——变体相异性 = 各变体定义性主家具的墙面归属(wallPlan)两两不同；N = 去重后实质不同的可行布局数（不强凑、不重复）。房型中立：主家具按房间策略判定。返回结构化 overview；不写盘。
 tools: Read, Skill
-model: haiku
+model: opus
 ---
 
 # multi-plan-agent：多方案生成分身（Step3）
