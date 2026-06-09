@@ -20,7 +20,8 @@ const REFINE_ROUND = 1                                 // 固定 1 轮（锁死�
 // 评审维度：由 L0 路由层经 args 注入的不透明字符串列表（维度本体属知识层 design_evaluation）；
 // 本脚本只迭代、不内嵌任何维度语义。缺省则只跑通用维（不臆造维度）。
 const DIMS = Array.isArray(args?.dimensions) ? args.dimensions : []
-const GENERAL = '__general__'
+const GENERAL = '通用品质'      // Layer 1.5（靠墙/间隙/对齐/空间利用）
+const DESIGN_Q = '设计品质'     // Layer 2（一个分身整体覆盖全部注入维）
 
 function clampN(raw){ const n = Math.max(1, raw || 3); return Math.min(n, 4) }   // 软上限 4，默认 3
 let N = clampN(args?.n)
@@ -46,21 +47,22 @@ const OVERVIEW_SCHEMA = {  // Step3 返回：每变体一份相对完整的主�
       properties: { candidate: { type: 'string' }, reason: { type: 'string' } } } },
   },
 }
-const CRITIC_SCHEMA = {  // Step5 单维 + 通用共用，dimension 区分；去打分：只报该维明显问题，无问题=直接通过
+const CRITIC_SCHEMA = {  // Step5 评审：每变体 2 份——设计品质(整体覆盖全维) + 通用品质(Layer1.5)；去打分：只报明显问题
   type: 'object', required: ['dimension', 'hasIssue', 'layer1Fail', 'directionRespecting', 'issues'],
   properties: {
-    dimension: { type: 'string' },                     // 维度之一 或 '__general__'
-    hasIssue: { type: 'boolean' },                     // 该维是否发现明显问题；false = 直接通过（不强行凑优点）
+    dimension: { type: 'string' },                     // '设计品质' 或 '通用品质'
+    hasIssue: { type: 'boolean' },                     // 是否发现明显问题；false = 直接通过（不强行凑优点）
     layer1Fail: { type: 'boolean' },                   // 工程合规硬伤（validate 已过仍兜底）
     directionRespecting: { type: 'boolean' },          // 评审是否在既定方向内（防裁判把"换方向"当缺陷）
     issues: { type: 'array', items: { type: 'object', required: ['desc', 'severity'],   // 只列明显问题，无则空数组
       properties: {
+        dim: { type: 'string' },                                 // 该问题所属子维（设计品质:动线/空间意图/…；通用品质:靠墙/间隙/对齐/空间利用）
         desc: { type: 'string' },                                // 明显问题描述
         evidence: { type: 'string' },                            // 坐标/截图证据
         severity: { type: 'string', enum: ['硬违规', '明显', '轻微'] },  // 硬违规=layer1Fail/【必须】级✗
       } } },
-    generalChecks: { type: 'object',                            // 仅 __general__ 填
-      properties: { againstWall: { type: 'boolean' }, adjacentGap: { type: 'boolean' }, alignment: { type: 'boolean' } } },
+    generalChecks: { type: 'object',                            // 仅 通用品质 填
+      properties: { againstWall: { type: 'boolean' }, adjacentGap: { type: 'boolean' }, alignment: { type: 'boolean' }, spaceUsed: { type: 'boolean' } } },
   },
 }
 const JUDGE_SELECT_SCHEMA = {  // Step6 裁决：去打分，缺陷最少/最轻者胜（硬违规优先于明显数）
@@ -149,10 +151,10 @@ function reviewBlock(slug, reviews){
     const head = `- **${r.dimension}**：${r.hasIssue ? '发现问题' : '通过'}` +
       `${r.layer1Fail ? ' ⚠layer1Fail' : ''}${r.directionRespecting === false ? ' [非既定方向建议]' : ''}`
     const issues = (r.issues || []).length
-      ? '\n' + r.issues.map(i => `  - [${i.severity || '明显'}] ${i.desc}${i.evidence ? `（${i.evidence}）` : ''}`).join('\n')
+      ? '\n' + r.issues.map(i => `  - [${i.severity || '明显'}]${i.dim ? ` ${i.dim}:` : ''} ${i.desc}${i.evidence ? `（${i.evidence}）` : ''}`).join('\n')
       : '\n  - 无明显问题'
     const gc = (r.dimension === GENERAL && r.generalChecks && Object.keys(r.generalChecks).length)
-      ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''   // 仅 __general__ 维渲染，空对象 {} 也滤掉
+      ? `\n  - generalChecks：${JSON.stringify(r.generalChecks)}` : ''   // 仅 通用品质 维渲染，空对象 {} 也滤掉
     return head + issues + gc
   })
   return `## 评审结论\n\n${items.join('\n')}`
@@ -173,9 +175,13 @@ function landPrompt(slug, vc){
   return `${base}\n你负责落地变体 slug=${slug}。本变体方向上下文（variantContext，来自多方案概述，逐字遵守、不得改方向）：\n${JSON.stringify(vc, null, 2)}\n` +
     `按你的职责完成该变体完整落地（注册变体 + 按需 zones.json + 施工简报 + 施工 modules.json + validate），产物写入你自己的 _${slug}/ 私有文件。`
 }
-function criticPrompt(slug, dim, designPath){
-  return `${base}\n你评审变体 slug=${slug} 的【单一维度】 dimension=「${dim}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
-    `只评这一个维度，按你的职责返回结构化评审；判据自行从知识层取，不在此复述。`
+function designQualityPrompt(slug, dims, designPath){
+  return `${base}\n你做变体 slug=${slug} 的【Layer 2 设计品质·整体评审】 dimension=「${DESIGN_Q}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
+    `一次性整体覆盖这些设计维度：${(dims && dims.length) ? dims.join('、') : '（未注入）'}——逐维找明显问题，每个 issue 标 \`dim\`=所属维度，无问题该维不报。判据自行从知识层取，不在此复述。`
+}
+function generalQualityPrompt(slug, designPath){
+  return `${base}\n你做变体 slug=${slug} 的【Layer 1.5 通用品质】 dimension=「${GENERAL}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
+    `只判通用品质：靠墙完整性 / 相邻空隙 / 对齐 / 空间利用（有无大块墙段或区域既无家具又无显式留白理由——定性、不设阈值）；每个 issue 标 \`dim\`，并填 generalChecks。判据见知识层「Layer 1.5 通用品质」，不在此复述。`
 }
 function judgePrompt(candidates, excluded){
   const ctx = candidates.map(c => `- slug=${c.slug}（评审 ${c.reviews.length} 份）`).join('\n')
@@ -274,7 +280,7 @@ const slugs = variants.map(v => v.slug)
 if (!slugs.length) return { ok: false, reason: 'Step3 未产出任何变体' }
 const degenerate = N === 1 || slugs.length === 1
 log(`N=${slugs.length}（${degenerate ? 'N=1 退化' : '常规'}）；变体：${slugs.join('、')}`)
-if (!degenerate && DIMS.length === 0) log('⚠ 未注入评审维度（args.dimensions 缺），Step5 将仅跑通用维——多维评审失效')   // N-11
+if (!degenerate && DIMS.length === 0) log('⚠ 未注入评审维度（args.dimensions 缺），Step5 设计品质维跳过、仅跑通用品质')   // N-11
 
 // Step4 多方案落地 ↔ Step5 多维评审（pipeline 重叠：每 slug 落地 resolve 即扇出其评审）
 phase('多方案落地')
@@ -287,10 +293,10 @@ const reviewed = await parallel(slugs.map(slug => async () => {
   }
   if (degenerate) return { slug, reviews: [] }   // N=1 退化：跳过多维评审选拔
   const reviews = await parallel([
-    ...DIMS.map(dim => () => agent(criticPrompt(slug, dim, hiddenDesign(slug)),
-      { agentType: 'review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:${dim}`, phase: '多维评审' })),
-    () => agent(criticPrompt(slug, GENERAL, hiddenDesign(slug)),
-      { agentType: 'review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:general`, phase: '多维评审' }),
+    ...(DIMS.length ? [() => agent(designQualityPrompt(slug, DIMS, hiddenDesign(slug)),
+      { agentType: 'review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:设计品质`, phase: '多维评审' })] : []),
+    () => agent(generalQualityPrompt(slug, hiddenDesign(slug)),
+      { agentType: 'review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:通用品质`, phase: '多维评审' }),
   ])
   const ok = reviews.filter(Boolean)
   // 每 slug 评审落点 = 各自 _{slug}/DESIGN.md（不同文件，跨 slug 不竞态）
