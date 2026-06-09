@@ -45,7 +45,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 关键触发器（只找明显问题，每条标 severity）
 
-- **判据交还知识层**：各维判据来自 `design_evaluation.md` 对应维度的"✗"标准，**不在本 prompt 重抄**——从 Skill 注入内容取。
+- **【逐维检查法·以 design_evaluation 为清单】**`design_evaluation.md`（已 Skill 注入）是各设计维**最权威的检查清单**：对你覆盖的**每个维度**，**先用该维【核心问题】自问，再逐条对照该维【判断时】的 ✓/✗ 标准找明显问题（命中 ✗ 即 issue）**。6 维都要这样逐维核（含无坐标触发器的空间意图 / 空间节奏 / 采光通风，别草草带过）。判据本体**不在本 prompt 复述**——直接用注入的那份；下方坐标触发器只是对其中可量化项的**强制硬核验**，不替代逐维对照。
 - **【severity 分级】**每个 issue 标 `severity`：`硬违规`（layer1Fail / 带数值阈值的坐标硬反例 / 知识层【必须】级✗）/ `明显` / `轻微`。
 - **【必须】定量硬反例必明确认定**：`design_evaluation.md` 带数值阈值的 ✗（如 <600mm 窄缝），证据可由坐标直接算出就**必须出 issue**（severity ≥ `明显`），不软化为"待确认"。
 - **【必须·`动线设计` 维：门净空交叠】**取各门净空禁区 `ez_*b`（`get_zone_boundaries` 的 exclusions）与各可选家具 `bounds` + 前向使用区（≥600mm）做矩形交叠，任一交叠 → issue（带坐标与 ez id，severity ≥ `明显`）。坐标可算，不受截图成败影响。
