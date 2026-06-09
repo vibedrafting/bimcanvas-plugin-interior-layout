@@ -65,7 +65,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 可选家具补全（第二职责·做加法）
 
-**【必须】**核对采纳方案是否已含房间策略允许的可选家具（梳妆台 / 斗柜 / 展示柜等，见 `bedroom.md`「可选家具」节，由 Skill-L2 注入——含固定推荐位，如**梳妆台采光型 = 床尾对面墙·靠窗端**）。**若缺，尝试补入**：
+**【必须】**核对采纳方案是否已含房间策略允许的可选家具（梳妆台 / 斗柜 / 展示柜等，见 `bedroom.md`「可选家具」节，由 Skill-L2 注入）。**若缺，尝试补入**：
 1. `get_zone_boundaries` + 当前 modules → 算剩余可用墙段 / 空间。
 2. 逐个可选家具做**闭合预检**：能否在**不侵占主家具 / 已声明留白 / 主通道 / 门禁（ez_*）**前提下塞入（采光型 vs 组合型按 `bedroom.md` 权衡 + 动线侵占核验）。
 3. 能 → 放最佳候选位、bounds 4 顶点、`Edit` 写入采纳叶子 `modules.json`、`validate_layout`；并 `Edit` 同步施工简报「可选/附属家具」节。
@@ -111,7 +111,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 | `layer1Fail` | boolean | 工程合规硬伤兜底：validate 报 0 模块 / E013 / 模块数对不上文件 = 路径错，置 `true`（此时 `passed` 必为 `false`） |
 | `rootCause` | enum `'strategy'` \| `'placement'` \| `'none'` | 若仍有问题，根因在战略层（方向）还是落位层（摆放）；无问题填 `'none'`；E013/路径错填 `'placement'` |
 | `reviseInstruction` | string | 未通过时给下一步修订指令；通过可空 |
-| `failedDimensions` | string[] | 仍有未化解明显问题的维度名列表（对应评审 6 维：动线设计 / 空间意图 / 功能叙事 / 空间节奏 / 采光通风 / 家具最优布局） |
+| `failedDimensions` | string[] | 仍有未化解明显问题的维度名列表（取自评审各维，不在此枚举） |
 | `optimizationRecord` | string | 「## 优化记录」节完整 markdown 文本（交编排层写盘）；本轮无可记可空 |
 
 > 该结构化判决只约束**最终返回**，不改变精修方法论本体（仍迁移自 generate-placement §5 优化阶段）；中间执行照常用工具写盘。固定 1 轮：本分身不据 `rootCause` 自行再开一轮，是否需后续处理由 workflow 判断。**最终是否"精修通过"由编排层独立重跑 validate 比对模块数后判定，你的 `passed` 自报不作为唯一依据——故不得在路径错/0 模块时谎报 `passed=true`。**
