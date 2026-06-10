@@ -1,14 +1,12 @@
 export const meta = {
   name: 'interior-layout-scene1',
-  description: '场景①：设计引擎重做 —— 七步流（感知→规划推演→多方案→落地→评审→裁决→精修）',
+  description: '场景①：多方案设计 —— 感知→规划推演→多方案→集成落地（施工+识图自评+自优化）→方案对比，终选由用户在 Web 端执行',
   phases: [
-    { title: '感知', detail: '战略分析 ∥ 空间理解，定调诉求与空间骨架' },
+    { title: '感知', detail: '战略定调 + 空间骨架（单分身）' },
     { title: '规划推演', detail: '分区思维 ∥ 顺序思维，双轴出方案草稿' },
     { title: '多方案生成', detail: '消化双草稿，发散 N 个方向变体（含多样性护栏）' },
-    { title: '多方案落地', detail: 'N 路并行落地：注册变体 + 施工简报 + 施工 + validate' },
-    { title: '多维评审', detail: '每变体多单维 + 1 通用评审（只报明显问题，无则通过），与落地 pipeline 重叠' },
-    { title: '裁决', detail: '聚合评审选最优，采纳胜者（翻指针 + 去 _ 前缀）' },
-    { title: '精修', detail: '对采纳方案做固定 1 轮精修' },
+    { title: '方案落地', detail: 'N 路并行集成落地：施工简报 + 施工 + validate + 识图自评 + 自优化；每方案独立闸门核验' },
+    { title: '方案对比', detail: '脚本机械拼方案对比表（含实质雷同标注），交用户 Web 端终选' },
   ],
 }
 
@@ -16,15 +14,8 @@ export const meta = {
 const designZoneId = args?.designZoneId               // 必填，单段或多段 path，如 rz_3 或 rz_6/dz_1
 if (!designZoneId) throw new Error('args.designZoneId 必填')
 const userRequest  = args?.originalUserRequest || ''
-const REFINE_ROUND = 1                                 // 固定 1 轮（锁死，不开 args）
-// 评审维度：由 L0 路由层经 args 注入的不透明字符串列表（维度本体属知识层 design_evaluation）；
-// 本脚本只迭代、不内嵌任何维度语义。缺省则只跑通用维（不臆造维度）。
-const DIMS = Array.isArray(args?.dimensions) ? args.dimensions : []
-const GENERAL = '通用品质'      // Layer 1.5（靠墙/间隙/对齐/空间利用）
-const DESIGN_Q = '设计品质'     // Layer 2（一个分身整体覆盖全部注入维）
-
+// 评审维度判据不再经 args 注入——placement 集成自评后从知识层（Skill-L2 的 design_evaluation）自取。
 function clampN(raw){ const n = Math.max(1, raw || 3); return Math.min(n, 4) }   // 软上限 4，默认 3
-let N = clampN(args?.n)
 
 // ── 结构化输出 schema ───────────────────────────────────────────
 const PERCEPTION_SCHEMA = {  // Step1 感知（合并 战略定调 + 空间骨架）：两节文本，每字段首字符须为 markdown 标题
@@ -39,7 +30,7 @@ const PERCEPTION_SCHEMA = {  // Step1 感知（合并 战略定调 + 空间骨�
 // vcOf 负责把短名映射回 placement 用的长名（variantDirection 等），勿在 agent 侧改回长名。
 // 【差异化在方向层，不在配置层】每变体只锁 anchorSeed（≤1 条硬锚点：单家具/组合关系/空间策略三类型之一，
 // 类型语义由 agent 按房型策略判定），其余决策交落地分身全局重判。本脚本只比对不透明 anchorSeed 签名做
-// 产前弱护栏去重（抽象层查重能力有限），防雷同主防线 = judge 产后对各变体 modules.json 的事实查重。见 diverseEnough。
+// 产前弱护栏去重（抽象层查重能力有限），产后由 findDuplicates 比对各方案 factsheet 在对比表标注雷同。见 diverseEnough。
 const OVERVIEW_SCHEMA = {  // Step3 返回：每变体一个设计方向 + 唯一硬锚点
   type: 'object', required: ['variants', 'proposedN'],
   properties: {
@@ -56,60 +47,28 @@ const OVERVIEW_SCHEMA = {  // Step3 返回：每变体一个设计方向 + 唯�
       properties: { candidate: { type: 'string' }, reason: { type: 'string' } } } },
   },
 }
-const CRITIC_SCHEMA = {  // Step5 评审：每变体 2 份——设计品质(整体覆盖全维) + 通用品质(Layer1.5)；去打分：只报明显问题
-  type: 'object', required: ['dimension', 'hasIssue', 'layer1Fail', 'directionRespecting', 'issues'],
+// 【契约·三处同名钉死】Step4 返回字段须与 ① 本 PLACEMENT_SCHEMA ② placement-agent.md「Step H」③ 下方 comparisonBlock 读取一致。
+const PLACEMENT_SCHEMA = {  // Step4 集成落地返回：结果 + 对比表数据（脚本只排版/比对，不解释内容——房型中立）
+  type: 'object', required: ['ok'],
   properties: {
-    dimension: { type: 'string' },                     // '设计品质' 或 '通用品质'
-    hasIssue: { type: 'boolean' },                     // 是否发现明显问题；false = 直接通过（不强行凑优点）
-    layer1Fail: { type: 'boolean' },                   // 工程合规硬伤（validate 已过仍兜底）
-    directionRespecting: { type: 'boolean' },          // 评审是否在既定方向内（防裁判把"换方向"当缺陷）
-    issues: { type: 'array', items: { type: 'object', required: ['desc', 'severity'],   // 只列明显问题，无则空数组
+    ok: { type: 'boolean' },                           // false = 认输/失败（report 写明原因，可不给 factsheet）；true 时必须给完整 factsheet
+    factsheet: { type: 'object', required: ['mainFurnitureWalls', 'furnitureList', 'storageRunMm', 'optionalFurniture', 'selfCheckSummary', 'validateSummary'],
       properties: {
-        dim: { type: 'string' },                                 // 该问题所属子维（设计品质:动线/空间意图/…；通用品质:靠墙/间隙/对齐/空间利用）
-        desc: { type: 'string' },                                // 明显问题描述
-        evidence: { type: 'string' },                            // 坐标/截图证据
-        severity: { type: 'string', enum: ['硬违规', '明显', '轻微'] },  // 硬违规=layer1Fail/【必须】级✗
-      } } },
-  },
-}
-const JUDGE_SELECT_SCHEMA = {  // Step6 裁决：去打分，缺陷最少/最轻者胜（硬违规优先于明显数）
-  type: 'object', required: ['winner', 'ranking', 'rationale'],
-  properties: {
-    winner: { type: 'string' },
-    ranking: { type: 'array', items: { type: 'object', required: ['slug', 'defects'],   // 按缺陷少→多排序
-      properties: {
-        slug: { type: 'string' },
-        defects: { type: 'array', items: { type: 'object',          // 该变体未化解缺陷清单（空数组=无缺陷）
-          properties: { dim: { type: 'string' }, desc: { type: 'string' }, severity: { type: 'string', enum: ['硬违规', '明显', '轻微'] } } } },
-        oneLineReason: { type: 'string' },
-      } } },
-    rationale: { type: 'string' },                     // 文字客观优缺点对比 + 缺陷最少判定；判据来自知识层，不复述
-  },
-}
-const JUDGE_REFINE_SCHEMA = {  // Step7 精修判决（optimization 返回）
-  type: 'object', required: ['passed'],
-  properties: {
-    passed: { type: 'boolean' },
-    layer1Fail: { type: 'boolean' },                   // 工程合规硬伤兜底（如 E013/0 模块=路径错），与 passed 互斥语义
-    rootCause: { type: 'string', enum: ['strategy', 'placement', 'none'] },  // 决定 fix 改哪层
-    reviseInstruction: { type: 'string' },
-    failedDimensions: { type: 'array', items: { type: 'string' } },
-    optimizationRecord: { type: 'string' },            // R5：「## 优化记录」节文本，交 workflow 经 design-scribe upsert（不自写 DESIGN.md）
+        mainFurnitureWalls: { type: 'string' },        // 主家具墙面归属签名（如 "床:西墙|衣柜:北墙东段+东墙₂"）——跨方案雷同比对键
+        furnitureList: { type: 'string' },             // 一行家具清单（对照 tags；缺省的可选家具也列出）
+        storageRunMm: { type: 'number' },              // 贴墙收纳总延米
+        optionalFurniture: { type: 'string' },         // 每件可选家具：已布置(位置) / 置换布置 / 省略(坐标级理由)
+        selfCheckSummary: { type: 'string' },          // 识图自评结论 + 处置摘要
+        validateSummary: { type: 'string' },           // 最终 validate 结果
+      } },
+    report: { type: 'string' },
   },
 }
 // ── 编排层确定性后置核验 schema（verify-agent 只报事实，控制流在脚本）─────
-const ADOPT_VERIFY_SCHEMA = {  // Step6 后采纳收口核验
-  type: 'object', required: ['adoptedSlug', 'promoted'],
-  properties: {
-    adoptedSlug: { type: 'string' },                   // 回读父 DESIGN.md frontmatter 实际 adopted（未采纳填空串）
-    promoted: { type: 'boolean' },                     // 转正目录（无 _ 前缀）是否真实存在
-    repaired: { type: 'boolean' },                     // 本次是否由 verify-agent 补调了 adopt_variant
-  },
-}
-const VALIDATE_GATE_SCHEMA = {  // Step7 后独立 validate 闸门
+const VALIDATE_GATE_SCHEMA = {  // 每方案落地后独立 validate 闸门（不信 agent 自报）
   type: 'object', required: ['fileModuleCount', 'validateModuleCount', 'e013'],
   properties: {
-    fileModuleCount: { type: 'number' },               // 采纳叶子 modules.json 实际模块数（读文件数）
+    fileModuleCount: { type: 'number' },               // 方案叶子 modules.json 实际模块数（读文件数）
     validateModuleCount: { type: 'number' },           // validate_layout 解析到的模块数
     e013: { type: 'boolean' },                          // 是否报 E013_INVALID_MODULE_FILE_PATH（路径错）
     reason: { type: 'string' },
@@ -118,8 +77,7 @@ const VALIDATE_GATE_SCHEMA = {  // Step7 后独立 validate 闸门
 
 // ── 路径 helper（内联）──────────────────────────────────────────
 const parentDesign = `schemes/${designZoneId}/DESIGN.md`
-const hiddenDesign = slug => `schemes/${designZoneId}/_${slug}/DESIGN.md`
-const adoptedDesign = slug => `schemes/${designZoneId}/${slug}/DESIGN.md`
+// 方案目录可见无 _ 前缀：{slug}/DESIGN.md 由 placement 自写（含自检与优化记录），编排层不再写方案级文件
 
 // ── 节块净化（P-4）：剥 agent return 夹带的散文/英文前言与包裹围栏，再交 scribe ──
 // 仅做"剥到标题 + 去整体包裹围栏"这类机械清理，不改节内文字（不违逐字红线）。
@@ -168,80 +126,60 @@ function overviewBlock(ov){
   return `## 多方案战略层概述\n\n${lines.join('\n')}` +
     (exc.length ? `\n\n### 自动排除\n${exc.join('\n')}` : '')
 }
-function reviewBlock(slug, reviews){
-  const items = (reviews || []).map(r => {
-    const head = `- **${r.dimension}**：${r.hasIssue ? '发现问题' : '通过'}` +
-      `${r.layer1Fail ? ' ⚠layer1Fail' : ''}${r.directionRespecting === false ? ' [非既定方向建议]' : ''}`
-    const issues = (r.issues || []).length
-      ? '\n' + r.issues.map(i => `  - [${i.severity || '明显'}]${i.dim ? ` ${i.dim}:` : ''} ${i.desc}${i.evidence ? `（${i.evidence}）` : ''}`).join('\n')
-      : '\n  - 无明显问题'
-    return head + issues
-  })
-  return `## 评审结论\n\n${items.join('\n')}`
+// 方案对比表（纯机械排版 agent 产出的 factsheet 字段 + 不透明字符串雷同比对，零业务判断——房型中立）
+function wallsKey(f){ return (f?.mainFurnitureWalls || '').replace(/\s+/g, '') }
+function findDuplicates(items){   // items: [{slug, facts}]，返回 [[slugA, slugB], ...]
+  const pairs = []
+  for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+    const a = wallsKey(items[i].facts), b = wallsKey(items[j].facts)
+    if (a && a === b) pairs.push([items[i].slug, items[j].slug])
+  }
+  return pairs
 }
-function verdictBlock(v){
-  const ranked = (v?.ranking || []).map(r => {
-    const defects = (r.defects || []).length
-      ? r.defects.map(d => `[${d.severity || '明显'}]${d.dim ? `${d.dim}:` : ''}${d.desc}`).join('；')
-      : '无缺陷'
-    return `- ${r.slug}：${defects}${r.oneLineReason ? `（${r.oneLineReason}）` : ''}`
-  })
-  return `## 最终裁决\n\n- 胜者：**${v?.winner || ''}**\n\n### 各方案缺陷\n${ranked.join('\n')}\n\n### 裁决理由\n${v?.rationale || ''}`
+function comparisonBlock(items, chosenVariants, dup){
+  const vmeta = {}
+  for (const v of chosenVariants || []) vmeta[v.slug] = v
+  const rows = [
+    ['方向', s => vmeta[s]?.direction || ''],
+    ['锚点', s => vmeta[s]?.anchorSeed || ''],
+    ['主家具墙面', (s, f) => f.mainFurnitureWalls || ''],
+    ['家具清单', (s, f) => f.furnitureList || ''],
+    ['收纳延米(mm)', (s, f) => String(f.storageRunMm ?? '')],
+    ['可选家具', (s, f) => f.optionalFurniture || ''],
+    ['自检/识图', (s, f) => f.selfCheckSummary || ''],
+    ['validate', (s, f) => f.validateSummary || ''],
+    ['独立闸门', (s, f, it) => it.layer1Pass ? '通过' : '⚠未过'],
+  ]
+  const head = `| 项 | ${items.map(it => `**${it.slug}**`).join(' | ')} |`
+  const sep = `|----|${items.map(() => '----').join('|')}|`
+  const body = rows.map(([name, get]) =>
+    `| ${name} | ${items.map(it => String(get(it.slug, it.facts || {}, it)).replace(/\|/g, '／').replace(/\n/g, ' ')).join(' | ')} |`).join('\n')
+  const dupNote = (dup && dup.length)
+    ? `\n\n> ⚠ 实质雷同标注：${dup.map(p => `「${p[0]}」与「${p[1]}」主家具布局相同`).join('；')}——叙事不同不构成两个方案。`
+    : ''
+  return `## 方案对比\n\n${head}\n${sep}\n${body}${dupNote}\n\n> 请在画布中查看各方案，对照本表点击「采纳」选定；落选方案可自行删除。`
 }
 
-// ── prompt builder（薄拼接：只塞 id / 维度 / 上游 return，不含业务判断）──
+// ── prompt builder（薄拼接：只塞 id / 上游 return，不含业务判断）──
 const base = `设计区 designZoneId=${designZoneId}。`
 function landPrompt(slug, vc){
   return `${base}\n你负责落地变体 slug=${slug}。本变体方向上下文（variantContext，来自多方案概述）：\n${JSON.stringify(vc, null, 2)}\n` +
-    `约束力分级：variantAnchorSeed 是唯一硬约束（必须兑现；几何上不成立则走认输路径上报，不强行施工）；` +
+    `约束力分级：variantAnchorSeed 是唯一硬约束（必须兑现；几何上不成立则走认输路径返回 ok:false，不强行施工）；` +
     `variantDirection / variantNarrative 是方向参考（帮助你决策的 WHY 输入，不是合同条款，其中的描述性语句不得当禁令）；` +
     `variantAvoidance 是反模式提示。其余决策（主家具选墙、是否 L 形、可选家具位置等）由你按房间策略全局判断。\n` +
-    `按你的职责完成该变体完整落地（注册变体 + 按需 zones.json + 施工简报 + 施工 modules.json + 落位自检 + validate），产物写入你自己的 _${slug}/ 私有文件。`
-}
-function designQualityPrompt(slug, dims, designPath){
-  return `${base}\n你做变体 slug=${slug} 的【Layer 2 设计品质·整体评审】 dimension=「${DESIGN_Q}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
-    `一次性整体覆盖这些设计维度：${(dims && dims.length) ? dims.join('、') : '（未注入）'}——逐维找明显问题，每个 issue 标 \`dim\`=所属维度，无问题该维不报。判据自行从知识层取，不在此复述。`
-}
-function generalQualityPrompt(slug, designPath){
-  return `${base}\n你做变体 slug=${slug} 的【Layer 1.5 通用品质】 dimension=「${GENERAL}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
-    `只判通用品质：靠墙完整性 / 相邻空隙 / 对齐 / 空间利用（有无大块墙段或区域既无家具又无成立的留白豁免——定性、不设阈值）；每个 issue 标 \`dim\`。判据见知识层「Layer 1.5 通用品质」，不在此复述。`
-}
-function judgePrompt(candidates, excluded){
-  const ctx = candidates.map(c => `- slug=${c.slug}（评审 ${c.reviews.length} 份）`).join('\n')
-  const exc = (excluded && excluded.length)
-    ? `\n【已被采纳闸门打回、不得再选】：${excluded.join('、')}（这些方案无法转正/采纳，从候选中剔除）。` : ''
-  return `${base}\n原始用户诉求：${userRequest || '（见父 DESIGN.md 战略简报）'}\n候选变体：\n${ctx}${exc}\n` +
-    `先读各候选叶子 modules.json（_{slug}/ 或 _{slug}/{leaf}/ 下）与父 ${parentDesign}「设计区空间骨架」节，按你的提示词建横向事实台账（含实质雷同判定）；` +
-    `再读各候选评审结论（${candidates.map(c => hiddenDesign(c.slug)).join('、')}）+ 父 DESIGN.md 用户喜好，选出最优并调 adopt_variant 采纳；返回结构化判决。`
-}
-function judgeDegeneratePrompt(slug){
-  return `${base}\n仅有唯一候选变体 slug=${slug}（N=1 退化路径，无需选拔），直接调 adopt_variant 采纳它；返回结构化判决，winner=${slug}。`
-}
-function refinePrompt(slug){
-  return `${base}\n对已采纳的最优方案 slug=${slug}（已转正，路径 schemes/${designZoneId}/${slug}/）做固定 ${REFINE_ROUND} 轮精修：` +
-    `入场先 Glob/Read 实际 modules.json 路径（单叶子 ${slug}/modules.json 或多叶子 ${slug}/{leaf}/modules.json，不凭拼），` +
-    `读其最新评审结论 → 提取可优化项 → 修复（不改方向；几何级可自动、语义级记 [自动改图建议]）→ validate。` +
-    `不要自写 DESIGN.md：把「## 优化记录」节文本放进返回的 optimizationRecord 字段，由编排层写盘。` +
-    `返回结构化精修判决（passed / layer1Fail / rootCause / reviseInstruction / failedDimensions / optimizationRecord）。`
-}
-// 采纳收口核验（verify-agent，只报事实）：探测转正态 → 未满足补调 adopt_variant → 回读校验
-function adoptVerifyPrompt(slug){
-  return `${base}\n你是采纳收口核验分身（只报事实，不做设计判断、不决定重挑/跳过）。胜者 slug=${slug}。\n` +
-    `① Glob schemes/${designZoneId}/ 探测：转正目录「${slug}」（无 _ 前缀）是否存在、隐藏目录「_${slug}」是否仍在；Read 父 DESIGN.md（${parentDesign}）首部 frontmatter 取 adopted。\n` +
-    `② 若未真转正（转正目录缺失 或 adopted≠${slug}）：以 function-calling 调 adopt_variant({ designZoneId:"${designZoneId}", winnerSlug:"${slug}" }) 补做（幂等可重入）。\n` +
-    `③ 回读校验：再次确认转正目录存在 + 父 DESIGN.md frontmatter adopted 的真实值。\n` +
-    `返回 { adoptedSlug:回读到的真实 adopted（无则空串）, promoted:转正目录是否存在, repaired:本次是否补调过 adopt_variant }。`
+    `按你的职责完成该变体完整集成落地（注册可见变体 + 按需 zones.json + 施工简报 + 施工 modules.json + 落位自检 + validate + 识图自评 + 自优化 + 自检与优化记录），` +
+    `产物写入 ${slug}/ 方案目录，最后按 schema 返回 ok + factsheet。${upstreamSenses}\n\n${zoningSec || ''}\n\n${seqSec || ''}`
 }
 // 独立 validate 闸门（verify-agent，只报事实，不自判 passed）
 function validateGatePrompt(slug){
-  return `${base}\n你是精修后置 validate 闸门分身（只报事实，不自判 passed/通过、不决定重试/跳过）。采纳方案 slug=${slug}。\n` +
-    `① Glob/Read 解析采纳叶子真实路径与叶子 zoneIds：有 schemes/${designZoneId}/${slug}/zones.json → 多叶子，取其声明的叶子集；无 → 单叶子，路径 ${slug}/modules.json、zoneId=${designZoneId}。\n` +
-    `② Read 各采纳叶子 modules.json，数其 modules 数组实际长度之和 = fileModuleCount。\n` +
-    `③ 调 validate_layout({ zoneIds:[采纳叶子 zoneIds] })，取其解析到的模块数 = validateModuleCount；若返回 E013_INVALID_MODULE_FILE_PATH 则 e013=true。\n` +
+  return `${base}\n你是落地后置 validate 闸门分身（只报事实，不自判 passed/通过、不决定重试/跳过）。方案 slug=${slug}。\n` +
+    `① Glob/Read 解析方案叶子真实路径与叶子 zoneIds：有 schemes/${designZoneId}/${slug}/zones.json → 多叶子，取其声明的叶子集；无 → 单叶子，路径 ${slug}/modules.json、zoneId=${designZoneId}。\n` +
+    `② Read 各叶子 modules.json，数其 modules 数组实际长度之和 = fileModuleCount。\n` +
+    `③ 调 validate_layout({ zoneIds:[方案叶子 zoneIds] })，取其解析到的模块数 = validateModuleCount；若返回 E013_INVALID_MODULE_FILE_PATH 则 e013=true。\n` +
     `返回 { fileModuleCount, validateModuleCount, e013, reason:一句话说明 }。最终是否通过由编排层判定，你只给原始数字与 e013。`
 }
 
-// ═══════════════ 七步编排 ═══════════════
+// ═══════════════ 五段编排 ═══════════════
 
 // Step1 感知：战略定调 + 空间骨架（单分身，schema 双节返回；scribe 后台挂链）
 phase('感知')
@@ -278,7 +216,7 @@ async function genOverview(retryNote){
 function pickN(ov){ return Math.min(clampN(args?.n || ov?.proposedN), 4) }
 function chooseVariants(ov){ return (ov?.variants || []).slice(0, pickN(ov)) }
 // 产前弱护栏：anchorSeed（唯一硬锚点）两两不同；同 anchorSeed=同一方案，不论叙事。
-// 抽象层查重能力有限（叙事不同而落地相同的雷同在此查不出），防雷同主防线 = judge 产后事实查重。
+// 抽象层查重能力有限（叙事不同而落地相同的雷同在此查不出），产后由 findDuplicates 比对 factsheet 在对比表标注。
 // 【房型中立】只比对不透明签名（归一化去空白），不内嵌任何家具/墙名——卧室/卫生间/客厅通用。
 function layoutKey(v){ return (v.anchorSeed || '').replace(/\s+/g, '') }
 function diverseEnough(vs){ return new Set(vs.map(layoutKey)).size === vs.length }
@@ -291,13 +229,12 @@ if (chosen.length > 1 && !diverseEnough(chosen)) {
   const reChosen = chooseVariants(re)
   overview = re; chosen = reChosen                       // 无条件放行第二轮（最新重出版本），保留单次重试边界
   if (!(reChosen.length <= 1 || diverseEnough(reChosen)))
-    log('重出后落地集仍有雷同，仍放行第二轮（避免死循环），由裁决阶段兜底')
+    log('重出后落地集仍有雷同，仍放行第二轮（避免死循环），由产后对比表雷同标注兜底')
 }
 scribeChain = scribeChain.then(() => writeSections(parentDesign, [overviewBlock({ ...overview, variants: chosen })], '多方案生成'))
 
 // 落地集（= 收敛后 slice，护栏已在其上校验/兜底）
 const variants = chosen
-N = variants.length
 const vcOf = {}
 for (const v of variants) vcOf[v.slug] = {
   variantDirection: v.direction, variantNarrative: v.narrative,
@@ -305,84 +242,43 @@ for (const v of variants) vcOf[v.slug] = {
 }
 const slugs = variants.map(v => v.slug)
 if (!slugs.length) return { ok: false, reason: 'Step3 未产出任何变体' }
-const degenerate = N === 1 || slugs.length === 1
-log(`N=${slugs.length}（${degenerate ? 'N=1 退化' : '常规'}）；变体：${slugs.join('、')}`)
-if (!degenerate && DIMS.length === 0) log('⚠ 未注入评审维度（args.dimensions 缺），Step5 设计品质维跳过、仅跑通用品质')   // N-11
+log(`N=${slugs.length}；变体：${slugs.join('、')}`)
 
-// Step4 多方案落地 ↔ Step5 多维评审（pipeline 重叠：每 slug 落地 resolve 即扇出其评审）
-await scribeChain   // placement 仍从盘读父 DESIGN.md（骨架/草稿/概述），落地前确保前三节已写完
-phase('多方案落地')
-const reviewed = await parallel(slugs.map(slug => async () => {
+// Step4 方案落地（集成：施工 + validate + 识图自评 + 自优化）：每方案落地完即跟独立 validate 闸门（pipeline 重叠）
+// 上游材料已直传进 landPrompt，placement 不读父 DESIGN.md——scribeChain 无需在此收口。
+phase('方案落地')
+const landed = await parallel(slugs.map(slug => async () => {
+  let r = null
   try {
-    await agent(landPrompt(slug, vcOf[slug]), { agentType: 'placement-agent', label: `land:${slug}`, phase: '多方案落地' })
+    r = await agent(landPrompt(slug, vcOf[slug]),
+      { agentType: 'placement-agent', schema: PLACEMENT_SCHEMA, label: `land:${slug}`, phase: '方案落地' })
   } catch (e) {
-    log(`slug ${slug} 落地失败/认输，跳过其评审`)
-    return { slug, reviews: [], failed: true }
+    log(`slug ${slug} 落地异常`)
+    return { slug, failed: true }
   }
-  if (degenerate) return { slug, reviews: [] }   // N=1 退化：跳过多维评审选拔
-  const reviews = await parallel([
-    ...(DIMS.length ? [() => agent(designQualityPrompt(slug, DIMS, hiddenDesign(slug)),
-      { agentType: 'design-review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:设计品质`, phase: '多维评审' })] : []),
-    () => agent(generalQualityPrompt(slug, hiddenDesign(slug)),
-      { agentType: 'general-review-agent', schema: CRITIC_SCHEMA, label: `review:${slug}:通用品质`, phase: '多维评审' }),
-  ])
-  const ok = reviews.filter(Boolean)
-  // 每 slug 评审落点 = 各自 _{slug}/DESIGN.md（不同文件，跨 slug 不竞态）
-  await writeSections(hiddenDesign(slug), [reviewBlock(slug, ok)], '多维评审')
-  return { slug, reviews: ok }
+  if (!r?.ok) { log(`slug ${slug} 落地失败/认输（如实保留，不计入对比表）`); return { slug, failed: true, report: r?.report } }
+  // 独立后置 validate 闸门：不信 placement 自报，verify-agent 重跑 validate 比对模块数；布尔在脚本算。
+  const gate = await agent(validateGatePrompt(slug),
+    { agentType: 'verify-agent', schema: VALIDATE_GATE_SCHEMA, label: `gate:${slug}`, phase: '方案落地' })
+  const layer1Pass = !!gate && !gate.e013 && gate.validateModuleCount === gate.fileModuleCount && gate.fileModuleCount > 0
+  if (!layer1Pass) log(`slug ${slug} 独立闸门未过（如实标注）：e013=${gate?.e013}, validateCount=${gate?.validateModuleCount}, fileCount=${gate?.fileModuleCount}`)
+  return { slug, facts: r.factsheet, layer1Pass }
 }))
 
-const valid = reviewed.filter(r => r && !r.failed)
-if (!valid.length) return { ok: false, reason: '全部候选落地失败（不强宣成功）' }   // 对齐 D14 验证闸门
-
-// Step6 裁决 + 采纳收口（R1）：judge 选最优（仍内部调 adopt_variant），但其 prose 自述不作数；
-// 编排层用零领域 verify-agent 独立探测→补做 adopt→回读校验。采纳失败则打回裁决、排除坏胜者重挑 1 次。
-phase('裁决')
-let winnerSlug = null
-let adoptOk = false
-const excluded = []
-for (let attempt = 0; attempt < 2 && !adoptOk; attempt++) {
-  const pool = valid.filter(c => !excluded.includes(c.slug))
-  if (!pool.length) break
-  const verdict = await agent(
-    degenerate ? judgeDegeneratePrompt(pool[0].slug) : judgePrompt(pool, excluded),
-    { agentType: 'judge-agent', schema: JUDGE_SELECT_SCHEMA, label: `judge:select${attempt ? '-retry' : ''}`, phase: '裁决' })
-  winnerSlug = verdict?.winner || pool[0].slug
-  await writeSections(parentDesign, [verdictBlock(verdict)], '裁决')   // 正文节 workflow 写；frontmatter 由 adopt_variant 写（二者串行不并发）
-  // 采纳确定性后置核验（verify-agent 只报事实，控制流在脚本）
-  const adopt = await agent(adoptVerifyPrompt(winnerSlug),
-    { agentType: 'verify-agent', schema: ADOPT_VERIFY_SCHEMA, label: `adopt:${winnerSlug}`, phase: '裁决' })
-  if (adopt && adopt.adoptedSlug === winnerSlug && adopt.promoted) {
-    adoptOk = true
-    if (adopt.repaired) log(`采纳由编排层补做生效（judge 未真转正，verify-agent 补调 adopt）：${winnerSlug}`)
-  } else {
-    log(`采纳收口失败（${winnerSlug}：adoptedSlug=${adopt?.adoptedSlug ?? 'null'}, promoted=${adopt?.promoted}），打回裁决排除该胜者重挑`)
-    excluded.push(winnerSlug)
-  }
-}
-if (!adoptOk) throw new Error(`采纳收口失败：重挑后仍无有效可采纳胜者（已排除 ${excluded.join('、') || '无'}）`)
-
-// Step7 精修：固定 1 轮（采纳方案已转正）
-phase('精修')
-const refine = await agent(refinePrompt(winnerSlug),
-  { agentType: 'optimization-agent', schema: JUDGE_REFINE_SCHEMA, label: `refine:${winnerSlug}`, phase: '精修' })
-// optimization 仅 Edit 采纳叶子 modules.json（单叶子 {slug}/modules.json 或多叶子 {slug}/{leaf}/modules.json，入场自行 Glob 解析）；
-// R5：「优化记录」节由 optimization 经 schema 返回、workflow 经 design-scribe upsert，保评审节不被全量重建压成占位。
-if (refine?.optimizationRecord) await writeSections(adoptedDesign(winnerSlug), [refine.optimizationRecord], '精修', ['优化记录'])
-
-// R2 独立后置 validate 闸门：不信 optimization 自报 passed，verify-agent 独立重跑 validate 比对模块数；最终布尔在脚本算。
-const gate = await agent(validateGatePrompt(winnerSlug),
-  { agentType: 'verify-agent', schema: VALIDATE_GATE_SCHEMA, label: `gate:${winnerSlug}`, phase: '精修' })
-const layer1Pass = !!gate && !gate.e013 && gate.validateModuleCount === gate.fileModuleCount && gate.fileModuleCount > 0
-const refinePassed = !!(refine?.passed) && !refine?.layer1Fail && layer1Pass
-if (!refinePassed)
-  log(`精修后置闸门未过（如实汇报、不重试）：refine.passed=${refine?.passed}, refine.layer1Fail=${refine?.layer1Fail}, e013=${gate?.e013}, validateCount=${gate?.validateModuleCount}, fileCount=${gate?.fileModuleCount}`)
+// Step5 方案对比：脚本机械拼对比表（零 LLM），终选交用户 Web 端
+phase('方案对比')
+const valid = landed.filter(v => v && !v.failed)
+if (!valid.length) return { ok: false, reason: '全部候选落地失败（不强宣成功）' }
+const dup = findDuplicates(valid)
+if (dup.length) log(`实质雷同标注：${dup.map(p => p.join('≈')).join('、')}`)
+scribeChain = scribeChain.then(() => writeSections(parentDesign, [comparisonBlock(valid, chosen, dup)], '方案对比'))
+await scribeChain   // 收口全部后台写盘（含前三节与对比表），保证 return 时父 DESIGN.md 完整
 
 return {
   ok: true,
   designZoneId,
-  winner: winnerSlug,
-  candidates: slugs,
-  degenerate,
-  refinePassed,
+  variants: valid.map(v => ({ slug: v.slug, layer1Pass: v.layer1Pass })),
+  failed: landed.filter(v => v?.failed).map(v => v.slug),
+  duplicates: dup,
+  note: '方案已全部可见并通过自评自优化，请引导用户在画布中对照父 DESIGN.md「方案对比」表查看各方案并点击「采纳」终选；落选方案可由用户自行删除。',
 }

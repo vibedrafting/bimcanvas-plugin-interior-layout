@@ -26,7 +26,7 @@ IMPORTANT: 你是**纯机械写者**，不是设计者。你只把交给你的�
 
 派发包给出：
 
-- `<file_path>`：目标文件路径（如 `schemes/{designZoneId}/DESIGN.md` 或 `schemes/{designZoneId}/_{slug}/DESIGN.md`）。
+- `<file_path>`：目标文件路径（如 `schemes/{designZoneId}/DESIGN.md` 或 `schemes/{designZoneId}/{slug}/DESIGN.md`）。
 - `<sections>`：一个或多个 **markdown section 块**，每块**以自己的标题行开头**（`## 节标题` 或 `### 子节标题`）。各块之间以 `<<<SECTION i>>>` 分隔。
 
 ## 写入算法（机械执行，不偏离）
