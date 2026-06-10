@@ -115,20 +115,30 @@ const hiddenDesign = slug => `schemes/${designZoneId}/_${slug}/DESIGN.md`
 const adoptedDesign = slug => `schemes/${designZoneId}/${slug}/DESIGN.md`
 
 // ── 节块净化（P-4）：剥 agent return 夹带的散文/英文前言与包裹围栏，再交 scribe ──
-// 仅做"剥到首个 markdown 标题 + 去整体包裹围栏"这类机械清理，不改节内文字（不违逐字红线）。
-function sanitizeSection(s){
+// 仅做"剥到标题 + 去整体包裹围栏"这类机械清理，不改节内文字（不违逐字红线）。
+// expectedAnchor（可选）：期望节标题关键词——剥离到首个【包含该关键词的标题行】，跳过 agent 夹带的
+// 带标题草稿（如"### Analysis Summary"中间稿，实测曾泄漏进父 DESIGN.md）；无匹配则回退首标题行为。
+function sanitizeSection(s, expectedAnchor){
   if (!s) return s
   let t = String(s).trim()
   const fence = t.match(/^```[a-zA-Z]*\n([\s\S]*?)\n```$/)   // 整体被 ```lang … ``` 包裹 → 剥壳
   if (fence) t = fence[1].trim()
+  if (expectedAnchor) {
+    const re = new RegExp(`^#{1,6}\\s.*${expectedAnchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm')
+    const m = t.match(re)
+    if (m) return t.slice(t.indexOf(m[0])).trim()            // 命中期望锚 → 从该标题起取
+  }
   const h = t.search(/^#{1,6}\s/m)                           // 首个 markdown 标题位置
   if (h > 0) t = t.slice(h)                                  // 标题前的散文/英文前言剥掉；无标题(-1)/标题在首则不动
   return t.trim()
 }
 
 // ── 写盘 helper：把 markdown 节块串行交给 design-scribe（单写者，无并发同文件）──
-async function writeSections(path, blocks, phaseName){
-  const sections = blocks.filter(Boolean).map(sanitizeSection).filter(Boolean)
+// anchors（可选）：与 blocks 等长的期望节标题关键词数组（纯标题块如 '## 方案草稿' 传 null）。
+async function writeSections(path, blocks, phaseName, anchors){
+  const sections = blocks
+    .map((b, i) => b ? sanitizeSection(b, anchors && anchors[i]) : b)   // 按原索引对齐 anchors
+    .filter(Boolean)
   if (!sections.length) return
   const packed = sections.map((b, i) => `<<<SECTION ${i}>>>\n${b}`).join('\n\n')
   await agent(
@@ -184,7 +194,7 @@ function designQualityPrompt(slug, dims, designPath){
 }
 function generalQualityPrompt(slug, designPath){
   return `${base}\n你做变体 slug=${slug} 的【Layer 1.5 通用品质】 dimension=「${GENERAL}」。该变体产物位于：${designPath}（及其叶子 modules.json）。` +
-    `只判通用品质：靠墙完整性 / 相邻空隙 / 对齐 / 空间利用（有无大块墙段或区域既无家具又无显式留白理由——定性、不设阈值）；每个 issue 标 \`dim\`，并填 generalChecks。判据见知识层「Layer 1.5 通用品质」，不在此复述。`
+    `只判通用品质：靠墙完整性 / 相邻空隙 / 对齐 / 空间利用（有无大块墙段或区域既无家具又无成立的留白豁免——定性、不设阈值）；每个 issue 标 \`dim\`。判据见知识层「Layer 1.5 通用品质」，不在此复述。`
 }
 function judgePrompt(candidates, excluded){
   const ctx = candidates.map(c => `- slug=${c.slug}（评审 ${c.reviews.length} 份）`).join('\n')
@@ -231,7 +241,7 @@ const [strategySec, spaceSec] = await parallel([
   () => agent(`${base}\n你是 Step1 空间理解分身，独立理解当前户型，产出「设计区空间骨架」节并 return。`,
     { agentType: 'space-understanding-agent', label: 'sense:space', phase: '感知' }),
 ])
-await writeSections(parentDesign, [strategySec, spaceSec], '感知')
+await writeSections(parentDesign, [strategySec, spaceSec], '感知', ['用户诉求', '空间骨架'])
 
 // Step2 规划推演：分区思维 ∥ 顺序思维
 phase('规划推演')
@@ -241,7 +251,7 @@ const [zoningSec, seqSec] = await parallel([
   () => agent(`${base}\n你是 Step2 顺序思维分身，承接空间骨架产出「方案草稿 · 顺序思维」子段并 return。`,
     { agentType: 'sequential-design-agent', label: 'plan:sequential', phase: '规划推演' }),
 ])
-await writeSections(parentDesign, ['## 方案草稿', zoningSec, seqSec], '规划推演')
+await writeSections(parentDesign, ['## 方案草稿', zoningSec, seqSec], '规划推演', [null, '方案草稿', '方案草稿'])
 
 // Step3 多方案生成：单脑 + N 自适应 + 多样性护栏（不过则有上限重出）
 phase('多方案生成')
@@ -345,7 +355,7 @@ const refine = await agent(refinePrompt(winnerSlug),
   { agentType: 'optimization-agent', schema: JUDGE_REFINE_SCHEMA, label: `refine:${winnerSlug}`, phase: '精修' })
 // optimization 仅 Edit 采纳叶子 modules.json（单叶子 {slug}/modules.json 或多叶子 {slug}/{leaf}/modules.json，入场自行 Glob 解析）；
 // R5：「优化记录」节由 optimization 经 schema 返回、workflow 经 design-scribe upsert，保评审节不被全量重建压成占位。
-if (refine?.optimizationRecord) await writeSections(adoptedDesign(winnerSlug), [refine.optimizationRecord], '精修')
+if (refine?.optimizationRecord) await writeSections(adoptedDesign(winnerSlug), [refine.optimizationRecord], '精修', ['优化记录'])
 
 // R2 独立后置 validate 闸门：不信 optimization 自报 passed，verify-agent 独立重跑 validate 比对模块数；最终布尔在脚本算。
 const gate = await agent(validateGatePrompt(winnerSlug),
