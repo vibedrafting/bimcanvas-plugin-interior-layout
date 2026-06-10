@@ -27,7 +27,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 派发包给出 `designZoneId`、本变体 `slug` 和 `variantContext`（`variantDirection` / `variantNarrative` / **`variantAnchorSeed`** / `variantAvoidance`，来自 Step3「多方案战略层概述」）。**约束力分级**：
 - **`variantAnchorSeed` 是唯一硬约束**（≤1 条：单家具锚点 / 家具组合关系 / 空间策略之一）——必须兑现；若在当前几何下不成立，走认输路径上报，不强行施工。
 - `variantDirection` / `variantNarrative` 是**方向参考**——帮助你决策的 WHY 输入，**不是合同条款，其中的描述性语句不得当禁令执行**（例如 narrative 里"释放某墙为留白"只是方向叙事，是否留白、留多少由你按房间策略权衡）。
-- `variantAvoidance` 是反模式提示。
+- `variantAvoidance` 是反模式提示——它点名哪件家具 / 哪种做法就只限哪件，**不得泛化为整面墙 / 整个区域的禁区**（实测误判：avoidance 说"避免**衣柜(600深)**放床对面"，简报却把床对面整面墙写成禁放、连 400 深梳妆台也一并排除——通道影响须按各家具实体深度分别计算）。
 
 **其余决策由你全局重判**：主家具选墙、是否 L 形、可选家具位置、模块阵列、留白——在锚点约束下按房间策略自由判断（双候选评估 / L 形门槛 / 阵列前置扣减 / 闭合预检自然激活）。附属 / 跟随家具（床头柜 / 窗帘等）按方案草稿 + 房间策略补全。
 
