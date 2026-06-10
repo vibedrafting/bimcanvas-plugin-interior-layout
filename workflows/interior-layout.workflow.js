@@ -26,7 +26,14 @@ const DESIGN_Q = '设计品质'     // Layer 2（一个分身整体覆盖全部�
 function clampN(raw){ const n = Math.max(1, raw || 3); return Math.min(n, 4) }   // 软上限 4，默认 3
 let N = clampN(args?.n)
 
-// ── 结构化输出 schema（4 个）─────────────────────────────────────
+// ── 结构化输出 schema ───────────────────────────────────────────
+const PERCEPTION_SCHEMA = {  // Step1 感知（合并 战略定调 + 空间骨架）：两节文本，每字段首字符须为 markdown 标题
+  type: 'object', required: ['strategySec', 'spaceSec'],
+  properties: {
+    strategySec: { type: 'string' },                   // 「## 用户诉求 + 项目基础信息」节全文
+    spaceSec: { type: 'string' },                      // 「## 设计区空间骨架」节全文
+  },
+}
 // 【契约·三处同名钉死】Step3 变体字段短名（direction/narrative/anchorSeed/avoidance）
 // 必须三处一致：① 本 OVERVIEW_SCHEMA 属性名 ② multi-plan-agent.md 产出字段名 ③ 下方 vcOf 读取的 v.* 短名。
 // vcOf 负责把短名映射回 placement 用的长名（variantDirection 等），勿在 agent 侧改回长名。
@@ -134,6 +141,9 @@ function sanitizeSection(s, expectedAnchor){
 }
 
 // ── 写盘 helper：把 markdown 节块串行交给 design-scribe（单写者，无并发同文件）──
+// scribeChain：scribe 全部挂链后台执行——同文件写盘保持串行（链式），但不阻塞主链关键路径；
+// 在依赖盘上数据的步骤前（或 workflow return 前）须 await scribeChain 收口。
+let scribeChain = Promise.resolve()
 // anchors（可选）：与 blocks 等长的期望节标题关键词数组（纯标题块如 '## 方案草稿' 传 null）。
 async function writeSections(path, blocks, phaseName, anchors){
   const sections = blocks
@@ -233,32 +243,34 @@ function validateGatePrompt(slug){
 
 // ═══════════════ 七步编排 ═══════════════
 
-// Step1 感知：战略分析 ∥ 空间理解
+// Step1 感知：战略定调 + 空间骨架（单分身，schema 双节返回；scribe 后台挂链）
 phase('感知')
-const [strategySec, spaceSec] = await parallel([
-  () => agent(`${base}\n原始用户诉求：${userRequest}\n你是 Step1 战略分析分身，按你的职责产出「用户诉求 + 项目基础信息」节并 return。`,
-    { agentType: 'strategy-analysis-agent', label: 'sense:strategy', phase: '感知' }),
-  () => agent(`${base}\n你是 Step1 空间理解分身，独立理解当前户型，产出「设计区空间骨架」节并 return。`,
-    { agentType: 'space-understanding-agent', label: 'sense:space', phase: '感知' }),
-])
-await writeSections(parentDesign, [strategySec, spaceSec], '感知', ['用户诉求', '空间骨架'])
+const perception = await agent(
+  `${base}\n原始用户诉求：${userRequest}\n你是 Step1 感知分身，按你的职责完成「战略定调 + 空间骨架」两章，按 schema 返回 strategySec / spaceSec 两节。`,
+  { agentType: 'perception-agent', schema: PERCEPTION_SCHEMA, label: 'sense', phase: '感知' })
+const strategySec = perception?.strategySec || ''
+const spaceSec = perception?.spaceSec || ''
+if (!spaceSec) return { ok: false, reason: 'Step1 感知未产出空间骨架' }
+scribeChain = scribeChain.then(() => writeSections(parentDesign, [strategySec, spaceSec], '感知', ['用户诉求', '空间骨架']))
 
-// Step2 规划推演：分区思维 ∥ 顺序思维
+// Step2 规划推演：分区思维 ∥ 顺序思维（上游材料直传，免读盘）
 phase('规划推演')
+const upstreamSenses = `\n\n【上游材料·已附，免读父 DESIGN.md 对应节】\n\n${strategySec}\n\n${spaceSec}`
 const [zoningSec, seqSec] = await parallel([
-  () => agent(`${base}\n你是 Step2 分区思维分身，承接空间骨架产出「方案草稿 · 分区思维」子段并 return。`,
+  () => agent(`${base}\n你是 Step2 分区思维分身，承接下方空间骨架产出「方案草稿 · 分区思维」子段并 return。${upstreamSenses}`,
     { agentType: 'zoning-design-agent', label: 'plan:zoning', phase: '规划推演' }),
-  () => agent(`${base}\n你是 Step2 顺序思维分身，承接空间骨架产出「方案草稿 · 顺序思维」子段并 return。`,
+  () => agent(`${base}\n你是 Step2 顺序思维分身，承接下方空间骨架产出「方案草稿 · 顺序思维」子段并 return。${upstreamSenses}`,
     { agentType: 'sequential-design-agent', label: 'plan:sequential', phase: '规划推演' }),
 ])
-await writeSections(parentDesign, ['## 方案草稿', zoningSec, seqSec], '规划推演', [null, '方案草稿', '方案草稿'])
+scribeChain = scribeChain.then(() => writeSections(parentDesign, ['## 方案草稿', zoningSec, seqSec], '规划推演', [null, '方案草稿', '方案草稿']))
 
 // Step3 多方案生成：单脑 + N 自适应 + 多样性护栏（不过则有上限重出）
 phase('多方案生成')
 async function genOverview(retryNote){
   return agent(
-    `${base}\n你是 Step3 多方案生成分身，消化双草稿组织出 N 个【方向层变体】，返回结构化 overview（含 proposedN）。每变体含：direction（设计方向核心句，禁写具体家具配置）/ narrative（本方向为何值得探索）/ anchorSeed（本变体唯一硬锚点，最多 1 条，三类型与填法见你的提示词）/ avoidance（反模式提示，可选）。各变体 anchorSeed 必须两两不同（同锚点=同方案）；proposedN = 去重后实质不同的可行方向数，不足 3 不强凑、不重复。` +
-    `${retryNote || ''}`,
+    `${base}\n你是 Step3 多方案生成分身，消化下方双草稿组织出 N 个【方向层变体】，返回结构化 overview（含 proposedN）。每变体含：direction（设计方向核心句，禁写具体家具配置）/ narrative（本方向为何值得探索）/ anchorSeed（本变体唯一硬锚点，最多 1 条，三类型与填法见你的提示词）/ avoidance（反模式提示，可选）。各变体 anchorSeed 必须两两不同（同锚点=同方案）；proposedN = 去重后实质不同的可行方向数，不足 3 不强凑、不重复。` +
+    `${retryNote || ''}` +
+    `${upstreamSenses}\n\n${zoningSec || ''}\n\n${seqSec || ''}`,
     { agentType: 'multi-plan-agent', schema: OVERVIEW_SCHEMA, label: 'multiplan', phase: '多方案生成' })
 }
 // 红线15：相异性护栏必须在【落地集】上校验。先收敛 N → slice → 在 sliced 集上验 anchorSeed 两两不同，
@@ -281,7 +293,7 @@ if (chosen.length > 1 && !diverseEnough(chosen)) {
   if (!(reChosen.length <= 1 || diverseEnough(reChosen)))
     log('重出后落地集仍有雷同，仍放行第二轮（避免死循环），由裁决阶段兜底')
 }
-await writeSections(parentDesign, [overviewBlock({ ...overview, variants: chosen })], '多方案生成')
+scribeChain = scribeChain.then(() => writeSections(parentDesign, [overviewBlock({ ...overview, variants: chosen })], '多方案生成'))
 
 // 落地集（= 收敛后 slice，护栏已在其上校验/兜底）
 const variants = chosen
@@ -298,6 +310,7 @@ log(`N=${slugs.length}（${degenerate ? 'N=1 退化' : '常规'}）；变体：$
 if (!degenerate && DIMS.length === 0) log('⚠ 未注入评审维度（args.dimensions 缺），Step5 设计品质维跳过、仅跑通用品质')   // N-11
 
 // Step4 多方案落地 ↔ Step5 多维评审（pipeline 重叠：每 slug 落地 resolve 即扇出其评审）
+await scribeChain   // placement 仍从盘读父 DESIGN.md（骨架/草稿/概述），落地前确保前三节已写完
 phase('多方案落地')
 const reviewed = await parallel(slugs.map(slug => async () => {
   try {

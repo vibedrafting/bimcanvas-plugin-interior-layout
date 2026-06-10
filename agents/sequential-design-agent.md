@@ -29,7 +29,10 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 入场读取
 
-派发包给出 `designZoneId`。读取设计区父 `DESIGN.md` 的「设计区空间骨架」节；通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按设计区房间类型）取优先级链与房间策略；必要时调 `get_zone_boundaries` 取边界。
+派发包给出 `designZoneId`。**派发包已附上游材料（空间骨架等）时直接使用，免读父 `DESIGN.md` 对应节**；未附时读取父 `DESIGN.md` 的「设计区空间骨架」节。通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按设计区房间类型）取优先级链与房间策略；必要时调 `get_zone_boundaries` 取边界。
+
+**【必须·产出预算】**草稿子段 ≤30 行。
+> WHY：中间产物是下游 agent 的输入，不是给人看的文档——多写的每个字都在双倍收费（你生成一次、下游各读一次）。
 
 ## 关键触发器
 

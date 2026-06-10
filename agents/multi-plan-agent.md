@@ -26,7 +26,10 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## 入场读取
 
-派发包给出 `designZoneId` 与用户诉求。读取设计区父 `DESIGN.md` 的「用户诉求 + 项目基础信息」「设计区空间骨架」「方案草稿」（分区思维 + 顺序思维两子段）；通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）——**从房间策略取本房型的主家具清单与各家具墙面判据**（卧室：床/衣柜；卫生间：台盆/淋浴/马桶；客厅：沙发/电视柜；按实际 roomType 取）。
+派发包给出 `designZoneId` 与用户诉求。**派发包已附上游材料（空间骨架 + 双思维草稿等）时直接使用，免读父 `DESIGN.md` 对应节**；未附时读取父 `DESIGN.md` 的「用户诉求 + 项目基础信息」「设计区空间骨架」「方案草稿」。通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按房间类型）——**从房间策略取本房型的主家具清单与各家具墙面判据**（卧室：床/衣柜；卫生间：台盆/淋浴/马桶；客厅：沙发/电视柜；按实际 roomType 取）。
+
+**【必须·产出预算】**每变体 `narrative` ≤8 行。
+> WHY：中间产物是下游 agent 的输入，不是给人看的文档；narrative 是方向 WHY，不是方案书。
 
 ## 关键触发器
 
