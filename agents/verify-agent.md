@@ -30,7 +30,7 @@ IMPORTANT: 你是**零领域核验员**，不是设计者、不是裁判。你�
    - **存在**（多叶子）→ 叶子集 = 其声明的叶子 id；每叶子 modules.json = `{slug}/{leafId}/modules.json`。
    - **不存在**（单叶子）→ 路径 = `{slug}/modules.json`，zoneId = `{designZoneId}`。**不得**凭空在方案目录下拼 designZoneId 命名子目录。
 2. **数文件模块数**：`Read` 各叶子 `modules.json`，把各文件 `modules` 数组实际长度求和 = `fileModuleCount`。
-3. **跑校验**：调 `validate_layout({ zoneIds: [方案叶子 zoneIds] })`；取其解析到的模块数 = `validateModuleCount`；若返回 `E013_INVALID_MODULE_FILE_PATH` 则 `e013=true`，否则 `false`。
+3. **跑校验**：调 `validate_layout({ zoneIds: [方案叶子 zoneIds], variantId: "{slug}" })——**必须传 `variantId`**：方案处于未采纳状态，缺 `variantId` 时服务端按 adopted/canonical 路径解析、必然报 0 模块（实测误报教训）。取其解析到的模块数 = `validateModuleCount`；若返回 `E013_INVALID_MODULE_FILE_PATH` 则 `e013=true`，否则 `false`。
 4. **按 schema 报事实**：`{ fileModuleCount, validateModuleCount, e013, reason }`（`reason` 一句话客观说明，如"validate 解析 0 模块而文件有 7 模块=路径错"）。
 
 > 你**不**判断"落地是否通过"——`validateModuleCount==fileModuleCount && !e013 && fileModuleCount>0` 的成败由 workflow 判。validate 报 0 模块而文件有模块时，**如实报 `e013`/数字**，**禁**解释为"指针问题 / 活动方案问题"替结果开脱。

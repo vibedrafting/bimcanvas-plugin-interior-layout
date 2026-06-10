@@ -25,23 +25,26 @@ const PERCEPTION_SCHEMA = {  // Step1 感知（合并 战略定调 + 空间骨�
     spaceSec: { type: 'string' },                      // 「## 设计区空间骨架」节全文
   },
 }
-// 【契约·三处同名钉死】Step3 变体字段短名（direction/narrative/anchorSeed/avoidance）
+// 【契约·三处同名钉死】Step3 变体字段短名（direction/narrative/anchorSeed/avoidance/expectedWalls）
 // 必须三处一致：① 本 OVERVIEW_SCHEMA 属性名 ② multi-plan-agent.md 产出字段名 ③ 下方 vcOf 读取的 v.* 短名。
 // vcOf 负责把短名映射回 placement 用的长名（variantDirection 等），勿在 agent 侧改回长名。
 // 【差异化在方向层，不在配置层】每变体只锁 anchorSeed（≤1 条硬锚点：单家具/组合关系/空间策略三类型之一，
-// 类型语义由 agent 按房型策略判定），其余决策交落地分身全局重判。本脚本只比对不透明 anchorSeed 签名做
-// 产前弱护栏去重（抽象层查重能力有限），产后由 findDuplicates 比对各方案 factsheet 在对比表标注雷同。见 diverseEnough。
-const OVERVIEW_SCHEMA = {  // Step3 返回：每变体一个设计方向 + 唯一硬锚点
+// 类型语义由 agent 按房型策略判定），其余决策交落地分身全局重判。
+// 【expectedWalls 只查重、不锁定】实测教训：两个锚点类型不同（床=西墙 vs 北区收纳带）在同一户型收敛到同一物理
+// 布局——锚点签名查不出这种"方向异、落点同"。expectedWalls=该方向预期主家具墙面归属（严格"家具:墙名"格式），
+// 仅作产前查重键，**不进 vcOf、不传 placement**（不复活 wallPlan 配置锁定，落地重判权不变）。见 diverseEnough。
+const OVERVIEW_SCHEMA = {  // Step3 返回：每变体一个设计方向 + 唯一硬锚点 + 预期布局查重键
   type: 'object', required: ['variants', 'proposedN'],
   properties: {
     proposedN: { type: 'number' },                     // = 去重后实质不同的可行方向数（不强凑、不重复）
-    variants: { type: 'array', items: { type: 'object', required: ['slug', 'direction', 'anchorSeed'],
+    variants: { type: 'array', items: { type: 'object', required: ['slug', 'direction', 'anchorSeed', 'expectedWalls'],
       properties: {
         slug: { type: 'string' },
         direction: { type: 'string' },                 // 设计方向核心句（禁写具体家具配置）
         narrative: { type: 'string' },                 // 本方向为何值得探索（WHY 输入，非约束）
-        anchorSeed: { type: 'string' },                // 唯一硬锚点（≤1 条）——相异性查重键 + 落地唯一硬约束
+        anchorSeed: { type: 'string' },                // 唯一硬锚点（≤1 条）——落地唯一硬约束
         avoidance: { type: 'string' },                 // 反模式提示（区分兄弟变体的设计哲学，非家具禁止清单）
+        expectedWalls: { type: 'string' },             // 预期主家具墙面归属（严格"家具:墙名|家具:墙名"，禁尺寸/段位修饰/附属件）——仅查重
       } } },
     excluded: { type: 'array', items: { type: 'object',
       properties: { candidate: { type: 'string' }, reason: { type: 'string' } } } },
@@ -54,7 +57,7 @@ const PLACEMENT_SCHEMA = {  // Step4 集成落地返回：结果 + 对比表数�
     ok: { type: 'boolean' },                           // false = 认输/失败（report 写明原因，可不给 factsheet）；true 时必须给完整 factsheet
     factsheet: { type: 'object', required: ['mainFurnitureWalls', 'furnitureList', 'storageRunMm', 'optionalFurniture', 'selfCheckSummary', 'validateSummary'],
       properties: {
-        mainFurnitureWalls: { type: 'string' },        // 主家具墙面归属签名（如 "床:西墙|衣柜:北墙东段+东墙₂"）——跨方案雷同比对键
+        mainFurnitureWalls: { type: 'string' },        // 主家具墙面归属签名（严格"家具:墙名|家具:墙名"，禁尺寸/段位修饰/附属件）——跨方案雷同比对键
         furnitureList: { type: 'string' },             // 一行家具清单（对照 tags；缺省的可选家具也列出）
         storageRunMm: { type: 'number' },              // 贴墙收纳总延米
         optionalFurniture: { type: 'string' },         // 每件可选家具：已布置(位置) / 置换布置 / 省略(坐标级理由)
@@ -120,6 +123,7 @@ async function writeSections(path, blocks, phaseName, anchors){
 function overviewBlock(ov){
   const lines = (ov?.variants || []).map(v =>
     `- **${v.slug}**：${v.direction || ''}\n  - 锚点：${v.anchorSeed || ''}\n` +
+    (v.expectedWalls ? `  - 预期布局：${v.expectedWalls}\n` : '') +
     (v.avoidance ? `  - 避免：${v.avoidance}\n` : '') +
     `  - 叙事：${v.narrative || ''}`)
   const exc = (ov?.excluded || []).map(e => `- 排除「${e.candidate}」：${e.reason || ''}`)
@@ -127,7 +131,9 @@ function overviewBlock(ov){
     (exc.length ? `\n\n### 自动排除\n${exc.join('\n')}` : '')
 }
 // 方案对比表（纯机械排版 agent 产出的 factsheet 字段 + 不透明字符串雷同比对，零业务判断——房型中立）
-function wallsKey(f){ return (f?.mainFurnitureWalls || '').replace(/\s+/g, '') }
+// wallsKey 复用 normWalls 归一化（剥括号修饰/空白）——实测教训："西墙南段(3600mm)"与"西墙(全段4850mm)"
+// 这类自由文本修饰让精确比对失效；格式主防在 agent 侧（严格"家具:墙名"），此处归一化兜底。
+function wallsKey(f){ return normWalls(f?.mainFurnitureWalls) }
 function findDuplicates(items){   // items: [{slug, facts}]，返回 [[slugA, slugB], ...]
   const pairs = []
   for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
@@ -175,7 +181,7 @@ function validateGatePrompt(slug){
   return `${base}\n你是落地后置 validate 闸门分身（只报事实，不自判 passed/通过、不决定重试/跳过）。方案 slug=${slug}。\n` +
     `① Glob/Read 解析方案叶子真实路径与叶子 zoneIds：有 schemes/${designZoneId}/${slug}/zones.json → 多叶子，取其声明的叶子集；无 → 单叶子，路径 ${slug}/modules.json、zoneId=${designZoneId}。\n` +
     `② Read 各叶子 modules.json，数其 modules 数组实际长度之和 = fileModuleCount。\n` +
-    `③ 调 validate_layout({ zoneIds:[方案叶子 zoneIds] })，取其解析到的模块数 = validateModuleCount；若返回 E013_INVALID_MODULE_FILE_PATH 则 e013=true。\n` +
+    `③ 调 validate_layout({ zoneIds:[方案叶子 zoneIds], variantId:"${slug}" })——**必须传 variantId**（方案未采纳，缺 variantId 会按 adopted 路径解析到 0 模块，实测误报）；取其解析到的模块数 = validateModuleCount；若返回 E013_INVALID_MODULE_FILE_PATH 则 e013=true。\n` +
     `返回 { fileModuleCount, validateModuleCount, e013, reason:一句话说明 }。最终是否通过由编排层判定，你只给原始数字与 e013。`
 }
 
@@ -206,7 +212,7 @@ scribeChain = scribeChain.then(() => writeSections(parentDesign, ['## 方案草�
 phase('多方案生成')
 async function genOverview(retryNote){
   return agent(
-    `${base}\n你是 Step3 多方案生成分身，消化下方双草稿组织出 N 个【方向层变体】，返回结构化 overview（含 proposedN）。每变体含：direction（设计方向核心句，禁写具体家具配置）/ narrative（本方向为何值得探索）/ anchorSeed（本变体唯一硬锚点，最多 1 条，三类型与填法见你的提示词）/ avoidance（反模式提示，可选）。各变体 anchorSeed 必须两两不同（同锚点=同方案）；proposedN = 去重后实质不同的可行方向数，不足 3 不强凑、不重复。` +
+    `${base}\n你是 Step3 多方案生成分身，消化下方双草稿组织出 N 个【方向层变体】，返回结构化 overview（含 proposedN）。每变体含：direction（设计方向核心句，禁写具体家具配置）/ narrative（本方向为何值得探索）/ anchorSeed（本变体唯一硬锚点，最多 1 条，三类型与填法见你的提示词）/ avoidance（反模式提示，可选）/ expectedWalls（该方向预期主家具墙面归属，严格"家具:墙名|家具:墙名"格式、禁尺寸/段位修饰/附属件——仅查重用）。**各变体 expectedWalls 必须两两不同**（锚点/叙事再不同，预期落点相同=同一方案，合并报 1 个）；proposedN = 按预期落点去重后实质不同的可行布局数，不足 3 不强凑、不重复。` +
     `${retryNote || ''}` +
     `${upstreamSenses}\n\n${zoningSec || ''}\n\n${seqSec || ''}`,
     { agentType: 'multi-plan-agent', schema: OVERVIEW_SCHEMA, label: 'multiplan', phase: '多方案生成' })
@@ -215,17 +221,19 @@ async function genOverview(retryNote){
 // 否则 variants 数 > N 时护栏在全集通过、落地的前 N 个却可能雷同。
 function pickN(ov){ return Math.min(clampN(args?.n || ov?.proposedN), 4) }
 function chooseVariants(ov){ return (ov?.variants || []).slice(0, pickN(ov)) }
-// 产前弱护栏：anchorSeed（唯一硬锚点）两两不同；同 anchorSeed=同一方案，不论叙事。
-// 抽象层查重能力有限（叙事不同而落地相同的雷同在此查不出），产后由 findDuplicates 比对 factsheet 在对比表标注。
-// 【房型中立】只比对不透明签名（归一化去空白），不内嵌任何家具/墙名——卧室/卫生间/客厅通用。
-function layoutKey(v){ return (v.anchorSeed || '').replace(/\s+/g, '') }
+// 产前护栏：expectedWalls（预期主家具墙面归属）两两不同；预期落点相同=同一方案，不论锚点/叙事如何包装。
+// （实测教训：anchorSeed 签名查重失效——"床=西墙"与"北区收纳带"两个不同锚点收敛到同一物理布局。）
+// 产后仍由 findDuplicates 比对 factsheet 实际落点兜底（落地可能偏离预期）。
+// 【房型中立】只比对归一化不透明签名（去空白/剥括号修饰），不内嵌任何家具/墙名——卧室/卫生间/客厅通用。
+function normWalls(s){ return String(s || '').replace(/（[^）]*）|\([^)]*\)/g, '').replace(/\s+/g, '') }
+function layoutKey(v){ return normWalls(v.expectedWalls) }
 function diverseEnough(vs){ return new Set(vs.map(layoutKey)).size === vs.length }
 
 let overview = await genOverview()
 let chosen = chooseVariants(overview)
 if (chosen.length > 1 && !diverseEnough(chosen)) {
-  log('相异性护栏未过（落地集 anchorSeed 有雷同），要求去重重出 1 次')
-  const re = await genOverview('上一轮入选变体中有 anchorSeed（唯一硬锚点）雷同者——它们是同一方案。请让各变体锚点两两不同（换锚点类型或换锚定对象），或减少变体数（只报实质不同的方向，不补不重复）后重出。')
+  log('相异性护栏未过（落地集 expectedWalls 预期布局有雷同），要求去重重出 1 次')
+  const re = await genOverview('上一轮入选变体中有 expectedWalls（预期主家具墙面归属）雷同者——锚点/叙事再不同，预期落点相同就是同一方案。请合并雷同者并减少变体数（只报实质不同的布局，不补不重复），或给出预期落点真正不同的方向后重出。')
   const reChosen = chooseVariants(re)
   overview = re; chosen = reChosen                       // 无条件放行第二轮（最新重出版本），保留单次重试边界
   if (!(reChosen.length <= 1 || diverseEnough(reChosen)))
