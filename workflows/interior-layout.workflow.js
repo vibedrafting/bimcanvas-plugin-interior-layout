@@ -115,7 +115,8 @@ async function writeSections(path, blocks, phaseName, anchors){
   await agent(
     `把下列 section 块写入文件。机械 upsert，不改内容、不加评语。\n\n` +
     `<file_path>${path}</file_path>\n<sections>\n${packed}\n</sections>`,
-    { agentType: 'design-scribe', label: `scribe:${path}`, ...(phaseName ? { phase: phaseName } : {}) },
+    // label 带阶段名：4 个 scribe 同路径同名会让进度面板无法区分（无阶段名时退回路径）
+    { agentType: 'design-scribe', label: `scribe:${phaseName || path}`, ...(phaseName ? { phase: phaseName } : {}) },
   )
 }
 
