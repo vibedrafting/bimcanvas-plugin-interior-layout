@@ -1,5 +1,5 @@
 {
-  "$schema": "../../BIMCanvas/docs/plugin-manifest-schema.json",
+  "$schema": "../../BIMCanvas/BIMCanvas.Server/Schemas/plugin-manifest-schema.json",
 
   "name": "interior-layout",
   "version": "1.0.0",
