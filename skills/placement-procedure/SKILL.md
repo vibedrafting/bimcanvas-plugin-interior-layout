@@ -22,6 +22,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - **【必须】**默认中文。修改 `modules.json` / `DESIGN.md` 前先 Read 当前内容，不凭猜测写入。**【禁止】**给文本/JSON/图片传 `pages`；遇 `Invalid pages parameter` 下一次必须删 `pages`。
 - **【必须】**不跳过步骤、不编造家具尺寸、不修改 `baseline/`。
 - **【必须·无交互权】**需要突破锚点/合同的语义级改图时**不能静默落地**，只能停止并上报 `[自动改图建议]`（见 Step E 三级红线）。
+- **【必须·思考精炼，省 output】**你是 output-bound（生成速度受限）：施工简报 + 坐标推理（Step C+D）是全程最大生成块（实测占 placement 时长 ~4 成、一次吐 ~2 万 token）。推理一律**判据 + 数字 + 短句**；**禁**复述已加载的 references / `module_library` 规则原文（已在上下文，引结论即可），**禁**把每件家具的朝向 / 扣减推演展开成整段散文。闭合预检 / 扣减账本 / 轴向核对 **照常做**，但只落**结论与关键数字**——压的是复述水分，**不是**省掉该有的核验。
 
 ## 入场动作
 
@@ -63,6 +64,8 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 ## Step C：写完整施工简报 → `{slug}/DESIGN.md`（真因主战场）
 
 在本变体方向（`variantContext` 四字段）下，产出 placement 唯一可读的完整施工合同，用 `Write`/`Edit` 写入 `{slug}/DESIGN.md` 的施工简报节。
+
+> ⏱ 本节（连同 Step D 坐标）是 placement 最大 output 块——严守上方「思考精炼」纪律：要点化、不复述知识库原文、不把推演展成散文。
 
 **【必须·禁注入 frontmatter】**写 `{slug}/DESIGN.md` 时，正文起首必须是 **markdown 标题**（register 写出的骨架首行恒为 `# 方案设计说明`，保留它）。**绝不**在文件顶部注入任何 YAML frontmatter（`schemeMetadata.summary`）——`summary` 唯一来源是 `modules.json`，DESIGN.md 再写一份构成双源冲突。
 
@@ -113,6 +116,8 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - 靠**南墙**、facing 朝北（`semantic:"north"`，`value≈[0,1]`）：模块占 `Y ∈ [anchorY, anchorY + depth]`、`X` 方向铺 `width`。东墙/北墙同理按法线轴对应。
 
 锁定坐标前**核对** bounds 在垂直墙面方向的实际跨度 == 简报写的该模块 `depth`、沿墙跨度 == `width`；若 bounds 与简报的尺寸等级/深度自相矛盾（如床 X 跨度只有 1800 却标 2100 深床），这是轴向算错，必须改对后再写，不得让 modules.json 与施工简报互相打架。
+
+**【必须·真因⑦ L 形交接前移，免首验撞 overlap】**当衣柜/柜列为 L 形（两垂直段在转角相交）时，**写 modules 前**就把转角归属算清：转角方块（两段在角部交叠的 ~深×深 区域）**只归其中一段**，另一段 bounds **止于该段内侧面**、不得延伸进转角。两段都按"满墙"各自铺到转角端点 = 两 module 在转角重叠 = `validate` 必报 overlap 红线、触发整段重写（实测 west-wall L 角首验撞 2 个 overlap、~80s 返工）。在 Step C 扣减账本里就为 L 角写明"转角归 X 段、Y 段有效长 = 墙段 − 转角边"，Step D 据此一次落对、首验即过。
 
 **写入位置（硬约束）**：模块只写入**目标叶子分区**的 `modules.json`（`{slug}/{leaf}/modules.json` 或单叶子 `{slug}/modules.json`，路径取自 register 返回的 `leafPaths`）。**【禁止】**写入 `schemes/modules.json`、容器分区或根级 `modules.json`——会导致"0 个模块，0 个错误"的假成功。
 
@@ -193,6 +198,12 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - **【必须·自检与优化记录】**在 `{slug}/DESIGN.md` 写「## 自检与优化记录」节：识图两次调用各报了什么 → 每条的处置（修复了什么 / 驳回了什么及理由）→ 可选家具补全结论（布置/置换/省略+坐标级理由）→ `[优化期修订]` / `[视觉验证缺失]` 等标记。**用户终选时要看这一节审计你的把关过程。**
 
 ## Step H：结构化返回（factsheet）+ 认输
+
+**【必须·返回信封，首字段 `ok`】**最终调 StructuredOutput 返回**单个对象**，**必填首字段是 `ok`（boolean）**：`ok:true` 必带完整 `factsheet`，`ok:false` 带 `report`。骨架（先填 `ok` 再填其余）：
+```json
+{ "ok": true, "factsheet": { "mainFurnitureWalls": "...", "furnitureList": "...", "storageRunMm": 0, "optionalFurniture": "...", "selfCheckSummary": "...", "validateSummary": "..." }, "report": "..." }
+```
+> 实测教训：首次返回漏 `ok` 字段 → schema 校验失败、白白多一轮重试（~8s）。
 
 - **何时认输**：`variantAnchorSeed` 在当前几何下不成立，或闭合预检 fallback 也救不回 → 返回 `ok:false`，`report` 写明"本变体无法兑现 `variantAnchorSeed`：<具体原因 + 坐标证据>"，**不强行写出违反锚点的方案**，不造"0 模块 0 错误"假成功。
 - 正常完成：按调用方给定 schema 返回 `ok:true` + `factsheet`（对比表数据，用户终选的决策辅助）：
