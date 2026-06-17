@@ -24,9 +24,9 @@ allowed-tools: Read
 
 ### L1 — 工程合规
 
-- `references/design_principles.md`
+- `references/空间设计.md` —— 怎么读空间（动线/采光/安静度）+ 怎么组织空间（分区法则）
+- `references/家具放置.md` —— 家具放置通用法则（墙面归属/通道/顶角/填满/依赖）
 - `references/{roomType}.md` —— 即 `references/bedroom.md` / `references/bathroom.md` / `references/livingroom.md` 之一
-- `references/optional-furniture-rules.md`
 - `modules/module_library.json`
 
 ### L2 — 设计品质（= L1 全部 + 下列）

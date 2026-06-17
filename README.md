@@ -59,10 +59,12 @@
 
 | 文件 | 答什么 | 加载级 |
 |---|---|---|
-| `design_principles.md` | 跨房间通则：闭合施工预检、自改图边界、通道扣减口径 | L1 |
-| `bedroom.md` / `bathroom.md` / `livingroom.md` | 房间级设计策略（按 roomType 选一份） | L1 |
-| `optional-furniture-rules.md` | 可选家具的增补与联动置换规则 | L1 |
-| `design_evaluation.md` | 设计评价框架：五维设计目标 + 两层评价，自检/对比的判据 | L2 |
+| `空间设计.md` | 怎么读空间（动线/纵深/采光/安静度）+ 怎么组织空间（分区法则·锚内凹角/留白/隐私梯度） | L1 |
+| `家具放置.md` | 家具放置通用法则：墙面归属/朝向/通道/门段/顶角/填满有效段/家具依赖 + 模块间冲突仲裁 | L1 |
+| `bedroom.md` / `bathroom.md` / `livingroom.md` | 房间级设计策略（按 roomType 选一份，只装房型特异） | L1 |
+| `design_evaluation.md` | 设计评价框架：五维设计目标 + 两层评价 + 储物充分性/合格底线 | L2 |
+
+> 施工方法（闭合预检/修正阶梯/自改图边界/可选家具收束）= placement-procedure skill；非 references。
 
 ### 结构化知识：`projectMount/modules/module_library.json`
 

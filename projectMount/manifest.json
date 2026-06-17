@@ -16,11 +16,18 @@
       "description": "项目级运行时参考规则目录"
     },
     {
-      "name": "references/design_principles.md",
-      "target": "references/design_principles.md",
+      "name": "references/空间设计.md",
+      "target": "references/空间设计.md",
       "type": "template",
       "enabled": true,
-      "description": "项目级：通用设计原则"
+      "description": "项目级：空间设计（怎么读空间 + 怎么组织空间）"
+    },
+    {
+      "name": "references/家具放置.md",
+      "target": "references/家具放置.md",
+      "type": "template",
+      "enabled": true,
+      "description": "项目级：家具放置通用法则"
     },
     {
       "name": "references/design_evaluation.md",
@@ -49,13 +56,6 @@
       "type": "template",
       "enabled": true,
       "description": "项目级：客餐厅策略"
-    },
-    {
-      "name": "references/optional-furniture-rules.md",
-      "target": "references/optional-furniture-rules.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：可选家具规则"
     }
   ]
 }
