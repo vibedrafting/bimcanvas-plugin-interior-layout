@@ -1,3 +1,7 @@
+// ⚠️ 已退役·仅留作记录,不再可运行(2026-06-17)。
+// 「主控为脑」重构后,场景①改由主控自跑 Step1-3 + interior-layout-fanout.workflow.js 扇出落地;
+// 本脚本依赖的 perception/zoning/sequential/multi-plan/design-scribe 五个 agent 已删除,拉起必报 agent-not-found。
+// 旧五段流的可运行版本在 feat/workflow-experiment 分支;保留此文件仅供对照设计演进。
 export const meta = {
   name: 'interior-layout-scene1',
   description: '场景①：多方案设计 —— 感知→规划推演→多方案→集成落地（施工+识图自评+自优化）→方案对比，终选由用户在 Web 端执行',
