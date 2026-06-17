@@ -26,6 +26,21 @@
 
 先**解析设计区** `designZoneId`(设计区节点 path,可多段如 `rz_6/dz_客厅`):若用户未明确指向单一设计区,先问清,不要替用户臆断。再收集用户本轮原始诉求原文 `originalUserRequest`。
 
+### 方案数据结构（落点）
+
+```
+schemes/{designZoneId}/
+├── DESIGN.md          # 父·共享：用户诉求 / 空间骨架 / 方案草稿(双思维) / 多方案概述 / 方案对比 / 决策日志 + frontmatter adopted:{slug}
+├── {slug}/            # 方案·平级（无 canonical、无 variants/ 子层；可多个）
+│   ├── DESIGN.md      # 方案私有：方向 / 施工简报 / 自检与优化记录（无 frontmatter）
+│   ├── zones.json     # 可选：本方案分区思维结论（dz_*）
+│   └── dz_1/modules.json   # 叶子几何；不分区则直接 {slug}/modules.json
+└── {slug}/ …
+```
+- 意图 → `DESIGN.md`，几何 → `modules.json`；父持共享、子 `{slug}` 自包含。
+- 采纳 = 翻父 `adopted` 指针；终选归用户，主控不翻 `adopted`、不复制、不删落选。
+- 读设计区/方案数据走 `get_zone_boundaries` / `load_artifact`，不手拼 `schemes/...` 路径。
+
 ### Step1 感知（定调 + 空间骨架）
 
 > 🔴 **感知的视觉一律经 `perception-method` 的识图模式（传 prompt 取文字结论）**；**禁在加载 `perception-method` 前自行调 `canvas_vision` 截图、禁裸 `Read` 截图 PNG**——主控无 vision，读 PNG 看不见、只把上百 KB 图像灌进上下文污染推理（实测一次浪费 ~150K 字符，且"看到 L 形"实为坐标推断的幻觉）。
