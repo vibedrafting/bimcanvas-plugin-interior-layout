@@ -28,6 +28,8 @@
 
 ### Step1 感知（定调 + 空间骨架）
 
+> 🔴 **感知的视觉一律经 `perception-method` 的识图模式（传 prompt 取文字结论）**；**禁在加载 `perception-method` 前自行调 `canvas_vision` 截图、禁裸 `Read` 截图 PNG**——主控无 vision，读 PNG 看不见、只把上百 KB 图像灌进上下文污染推理（实测一次浪费 ~150K 字符，且"看到 L 形"实为坐标推断的幻觉）。
+
 1. `Skill` 加载 `load-design-knowledge`(`level: L2`,`roomType` 按设计区房间类型)+ `perception-method`。
 2. 按 `perception-method` 完成 §1 战略定调 + §2 空间骨架,产出 `strategySec`(## 用户诉求 + 项目基础信息)与 `spaceSec`(## 设计区空间骨架)两节。
 3. `Skill` 加载 `design-doc-upsert`,把两节幂等写入父 `DESIGN.md`。
