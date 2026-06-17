@@ -22,7 +22,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - **【必须】**默认中文。修改 `modules.json` / `DESIGN.md` 前先 Read 当前内容，不凭猜测写入。**【禁止】**给文本/JSON/图片传 `pages`；遇 `Invalid pages parameter` 下一次必须删 `pages`。
 - **【必须】**不跳过步骤、不编造家具尺寸、不修改 `baseline/`。
 - **【必须·无交互权】**需要突破锚点/合同的语义级改图时**不能静默落地**，只能停止并上报 `[自动改图建议]`（见 Step E 三级红线）。
-- **【必须·思考精炼，省 output】**你是 output-bound（生成速度受限）：施工简报 + 坐标推理（Step C+D）是全程最大生成块（实测占 placement 时长 ~4 成、一次吐 ~2 万 token）。推理一律**判据 + 数字 + 短句**；**禁**复述已加载的 references / `module_library` 规则原文（已在上下文，引结论即可），**禁**把每件家具的朝向 / 扣减推演展开成整段散文。闭合预检 / 扣减账本 / 轴向核对 **照常做**，但只落**结论与关键数字**——压的是复述水分，**不是**省掉该有的核验。
+- **【应·思考精炼，省 output】**施工简报 + 坐标推理（Step C+D）是全程最大生成块（实测 ~占 4 成时长）——**引 references / `module_library` 的结论、勿复述其原文**（已在上下文），勿把每件家具的朝向 / 扣减推演展成整段散文；闭合预检 / 扣减账本 / 轴向核对**照做、只落结论与关键数字**（压的是复述水分，非省核验）。
 
 ## 入场动作
 
@@ -64,8 +64,6 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 ## Step C：写完整施工简报 → `{slug}/DESIGN.md`（真因主战场）
 
 在本变体方向（`variantContext` 四字段）下，产出 placement 唯一可读的完整施工合同，用 `Write`/`Edit` 写入 `{slug}/DESIGN.md` 的施工简报节。
-
-> ⏱ 本节（连同 Step D 坐标）是 placement 最大 output 块——严守上方「思考精炼」纪律：要点化、不复述知识库原文、不把推演展成散文。
 
 **【必须·禁注入 frontmatter】**写 `{slug}/DESIGN.md` 时，正文起首必须是 **markdown 标题**（register 写出的骨架首行恒为 `# 方案设计说明`，保留它）。**绝不**在文件顶部注入任何 YAML frontmatter（`schemeMetadata.summary`）——`summary` 唯一来源是 `modules.json`，DESIGN.md 再写一份构成双源冲突。
 
@@ -206,7 +204,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 > 实测教训：首次返回漏 `ok` 字段 → schema 校验失败、白白多一轮重试（~8s）。
 
 - **何时认输**：`variantAnchorSeed` 在当前几何下不成立，或闭合预检 fallback 也救不回 → 返回 `ok:false`，`report` 写明"本变体无法兑现 `variantAnchorSeed`：<具体原因 + 坐标证据>"，**不强行写出违反锚点的方案**，不造"0 模块 0 错误"假成功。
-- 正常完成：按调用方给定 schema 返回 `ok:true` + `factsheet`（对比表数据，用户终选的决策辅助）：
+- **正常完成**——`factsheet` 各字段（用户终选的决策辅助，信封见上方骨架）：
   - `mainFurnitureWalls`：主家具墙面归属签名——跨方案雷同比对键，**严格 `家具:墙名|家具:墙名` 格式**（如 `床:西墙|衣柜:北墙+东墙₂|梳妆台:东墙₁`）：**禁尺寸/段位修饰（"南段""全段""右段"）/ 括号注释 / 附属家具（窗帘、床头柜不进）**——实测教训：自由文本修饰（"西墙南段" vs "西墙(全段4850mm)"）让两个相同布局的雷同比对失效，用户看到两个一模一样的方案各挂一套说辞；
   - `furnitureList`：一行家具清单（对照 zone tags / optionalTags，**缺省的可选家具也列出**，如"梳妆台:无"）；
   - `storageRunMm`：贴墙收纳总延米（数值）；
