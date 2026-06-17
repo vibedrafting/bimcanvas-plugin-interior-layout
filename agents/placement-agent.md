@@ -12,7 +12,7 @@ model: haiku
 ## 执行
 
 1. 入场即通过 `Skill` 加载 `placement-procedure`（落地方法本体：Step A–H + 全部护栏与 WHY）。
-2. 该方法第一步会要你再加载 `load-design-knowledge`（L2 + roomType）取设计知识本体——照做。
+2. 该方法第一步会要你再加载 `load-design-knowledge`（stage: 落地 + roomType）取设计知识本体——照做。
 3. 按 placement-procedure 完整执行：注册可见变体 → (按需)分区数据 → 施工简报 → 按图施工 → 落位自检 → validate + 三级红线修正 → 2 次定点识图自评 → 自优化(报警逐条处置 + 可选家具补全) → 写「自检与优化记录」→ 按调用方 schema 返回 `ok` + `factsheet`（或认输 `ok:false`）。
 
 > 调用方（扇出 workflow 的 landPrompt）会给出 `designZoneId` / `slug` / `variantContext`（含唯一硬约束 `variantAnchorSeed`）+ 上游材料。约束力分级、认输路径、factsheet 格式等全部以 `placement-procedure` 为准，本壳不复述。

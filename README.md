@@ -55,14 +55,16 @@
 
 工作流是骨架，**设计质量真正的来源是知识层**。同一份知识被"怎么落"（落地）和"落得对不对"（自检）共读，规则的分级天然就是自检的 rubric。
 
-### 散文知识：`projectMount/references/*.md`
+### 散文知识：`skills/load-design-knowledge/references/*.md`
 
-| 文件 | 答什么 | 加载级 |
-|---|---|---|
-| `空间设计.md` | 怎么读空间（动线/纵深/采光/安静度）+ 怎么组织空间（分区法则·锚内凹角/留白/隐私梯度） | L1 |
-| `家具放置.md` | 家具放置通用法则：墙面归属/朝向/通道/门段/顶角/填满有效段/家具依赖 + 模块间冲突仲裁 | L1 |
-| `bedroom.md` / `bathroom.md` / `livingroom.md` | 房间级设计策略（按 roomType 选一份，只装房型特异） | L1 |
-| `design_evaluation.md` | 设计评价框架：五维设计目标 + 两层评价 + 储物充分性/合格底线 | L2 |
+> 这 6 份 references 现随 `load-design-knowledge` skill 发布（`skills/load-design-knowledge/references/`），不再项目挂载；`load-design-knowledge` 是它们的**唯一加载入口**，按 stage 增量注入，调用方只按概念引用、不出现文件名。
+
+| 文件 | 答什么 |
+|---|---|
+| `spatial_design.md` | 怎么读空间（动线/纵深/采光/安静度）+ 怎么组织空间（分区法则·锚内凹角/留白/隐私梯度） |
+| `furniture_placement.md` | 家具放置通用法则：墙面归属/朝向/通道/门段/顶角/填满有效段/家具依赖 + 模块间冲突仲裁 |
+| `bedroom.md` / `bathroom.md` / `livingroom.md` | 房间级设计策略（按 roomType 选一份，只装房型特异） |
+| `design_evaluation.md` | 设计评价框架：五维设计目标 + 两层评价 + 储物充分性/合格底线 |
 
 > 施工方法（闭合预检/修正阶梯/自改图边界/可选家具收束）= placement-procedure skill；非 references。
 
@@ -74,7 +76,7 @@
 - **【建议】** → Layer 2 质量扣分
 - **【提示】** → 倾向参考
 
-知识按需分级加载（`load-design-knowledge` skill，`L1 工程合规 / L2 设计品质 × roomType`）——不是一次灌满，而是按当前阶段只取需要的那层。
+知识按需分级加载（`load-design-knowledge` skill，按 stage（感知/规划推演/多方案/落地）× roomType 增量加载）——不是一次灌满，而是按当前阶段只取需要的那层。
 
 ## 5. 构成速查
 
@@ -84,7 +86,7 @@
 | `workflows/` | `interior-layout.workflow.js`（五段编排主入口） |
 | `mcp_tools/`（3，`interior-layout` 命名空间） | `get_zone_boundaries`（zone 边界段语义 wall/passage/door/window）· `register_variant`（建变体目录骨架）· `adopt_variant`（采纳收口 + 翻指针） |
 | `validators/` | `interior-layout.py`（平台 `validate_layout` 委派的几何/碰撞/边界校验脚本） |
-| `skills/` | `load-design-knowledge`（设计知识分级加载器） |
+| `skills/` | `load-design-knowledge`（references 唯一加载入口·阶段感知；references/ 子目录随其发布） |
 
 > 设计意图统一落 `DESIGN.md`（普通 `Read`/`Write`/`Edit`）；旧的 `semantic_plan` / `reference_analysis` JSON 合同及对应 4 个 MCP 工具已退役删除。落地额外依赖平台 `canvas` 命名空间工具：`load_artifact` / `validate_layout` / `canvas_vision` / `create_job` · `complete_job`。
 

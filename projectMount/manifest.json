@@ -6,56 +6,7 @@
       "target": "modules",
       "type": "directory",
       "enabled": true,
-      "description": "家具模块库（module_library.json + SVG）"
-    },
-    {
-      "name": "",
-      "target": "references",
-      "type": "empty-directory",
-      "enabled": true,
-      "description": "项目级运行时参考规则目录"
-    },
-    {
-      "name": "references/空间设计.md",
-      "target": "references/空间设计.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：空间设计（怎么读空间 + 怎么组织空间）"
-    },
-    {
-      "name": "references/家具放置.md",
-      "target": "references/家具放置.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：家具放置通用法则"
-    },
-    {
-      "name": "references/design_evaluation.md",
-      "target": "references/design_evaluation.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：设计评价框架"
-    },
-    {
-      "name": "references/bedroom.md",
-      "target": "references/bedroom.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：卧室策略"
-    },
-    {
-      "name": "references/bathroom.md",
-      "target": "references/bathroom.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：卫生间策略"
-    },
-    {
-      "name": "references/livingroom.md",
-      "target": "references/livingroom.md",
-      "type": "template",
-      "enabled": true,
-      "description": "项目级：客餐厅策略"
+      "description": "家具模块库（module_library.json + SVG）——家具物本体，validators/Web/AI 共用"
     }
   ]
 }

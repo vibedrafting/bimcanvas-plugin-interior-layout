@@ -21,7 +21,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - **【必须】**先读后写：Read 默认 `{"file_path":"绝对路径"}`，仅分段读长文本时加 `offset`/`limit`。**【禁止】**给文本/JSON/图片传 `pages`；遇 `Invalid pages parameter` 下一次必须删 `pages`，不得原样重试。
 - **【必须】**不修改 `baseline/`，不修改任何①层冻结配置。
 - **战略选择点处置**：若调用方为可交互主控，关键战略选择点（路径取舍 / 锚点歧义 / 诉求与户型矛盾）可按需 `AskUserQuestion` 征询用户（SEAM）；默认不暂停，按推荐方向继续并以 `[自动代决] <决策 + 理由>` 显式标注，不静默吞掉。
-- **本方法不另造设计知识**：空间阅读三要素、安静度判据等本体在 `空间设计.md`（经 load-design-knowledge 注入），本 skill 只装感知执行动作与护栏。
+- **本方法不另造设计知识**：空间阅读三要素、安静度判据等本体由 load-design-knowledge 按阶段注入（不在本 skill），本 skill 只装感知执行动作与护栏。
 
 ## 入场动作
 
@@ -30,7 +30,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 1. Read 当前项目 `README.md`（意图理解与材料定位）；若设计区父 `schemes/{designZoneId}/DESIGN.md` 已存在，读取已有上下文（不覆盖）；必要时 `Glob` 定位项目级冻结配置（只读）。
 2. `mcp__interior-layout__get_zone_boundaries({ zoneIds: [designZoneId] })` —— 取设计区边界 / passage 几何。
 3. `mcp__canvas__canvas_vision`（**识图模式·传 prompt**）—— 取当前户型的**文字视觉证据**（deepseek 无 vision，必须传 `prompt` 让识图服务返回 `resultText`）。**【截图范围·禁 room 模式】**`designZoneId`（`rz_*`/`dz_*`）是 zone id 非物理房间 id——传 `projectPath` + `prompt` + `viewport:{mode:"zone", zoneId:"<designZoneId>"}`；**禁** `viewport.mode=room`/`roomId`（必报 `Room not found`）；图源与截图范围二选一。
-4. 通过 `Skill` 加载 `load-design-knowledge`（`level: L2`，`roomType` 按设计区房间类型）——取 `design_evaluation.md` 品质维度作为空间阅读判据。
+4. 通过 `Skill` 加载 `load-design-knowledge`（`stage: 感知`，`roomType` 按设计区房间类型）——取品质维度（load-design-knowledge 注入）作为空间阅读判据。
 
 ## §1 战略定调（产出 strategySec）
 
@@ -42,17 +42,17 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 ## §2 空间骨架（产出 spaceSec）
 
-**独立理解当前户型**——**永不读取参考图、参考分析或他人设计意图**（骨架被参考幻觉污染，整条设计链地基就坏了）。**执行动作**：从 `design_evaluation.md` 品质维度逐项核查当前户型，产出动线 / 纵深 / 采光 / 安静度 / 潜力风险结论。三要素的**定义**见 `空间设计.md` 第一幕，本节只执行核查、不重述定义。
+**独立理解当前户型**——**永不读取参考图、参考分析或他人设计意图**（骨架被参考幻觉污染，整条设计链地基就坏了）。**执行动作**：从品质维度（load-design-knowledge 注入）逐项核查当前户型，产出动线 / 纵深 / 采光 / 安静度 / 潜力风险结论。三要素的**定义**见 load-design-knowledge 注入的空间认知知识，本节只执行核查、不重述定义。
 
 ### 【必须】房型保真护栏（防地基污染）
 
 - **只描述客观空间属性**：动线 / 纵深 / 采光 / 安静度 / 墙面长短与完整性（有无窗、有无门段）。**禁写房型专属功能命名**——电视墙、床头墙、沙发区等是 Step2 双思维依房间策略才能下的功能定性，骨架阶段一律不写。
 - **墙面中性化**："最长完整实墙"只陈述为**墙面资源**（长度 / 完整性 / 无窗无门），不预判功能。
-- **禁引用未加载的 references**：只引用本次已加载的房间策略与 design_evaluation；禁凭训练先验编造"根据某房型策略……"的幻觉引用。
+- **禁引用未加载的设计知识**：只引用本次已加载的房间策略与品质维度（load-design-knowledge 注入）；禁凭训练先验编造"根据某房型策略……"的幻觉引用。
 
 ### 【必须】邻接噪音核查（标"安静"前置·执行动作）
 
-**执行动作**：给任一墙面下"安静"结论**之前**，先核查其背靠的相邻 zone / 房间类型（get_zone_boundaries 邻接信息或 Read baseline 几何），把背靠房型作为几何事实记入骨架。**判定映射（背靠什么 = 噪音源、如何降级）见 `空间设计.md` 安静度判据**——本节只强制"标安静前必先核查邻接"这一动作，不重述判定全文。陈述邻接房型不违反房型保真护栏（护栏禁的是给本 zone 墙面贴功能命名）。
+**执行动作**：给任一墙面下"安静"结论**之前**，先核查其背靠的相邻 zone / 房间类型（get_zone_boundaries 邻接信息或 Read baseline 几何），把背靠房型作为几何事实记入骨架。**判定映射（背靠什么 = 噪音源、如何降级）见 load-design-knowledge 注入的空间认知知识·安静度判据**——本节只强制"标安静前必先核查邻接"这一动作，不重述判定全文。陈述邻接房型不违反房型保真护栏（护栏禁的是给本 zone 墙面贴功能命名）。
 
 **【必须】**空间骨架只写空间骨架，**不写具体家具坐标**。
 

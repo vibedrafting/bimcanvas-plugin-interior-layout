@@ -1,44 +1,38 @@
 ---
 name: load-design-knowledge
 description: |
-  设计知识分级加载器。按 level(L1/L2/L3) + roomType(bedroom/bathroom/livingroom)
-  把工程合规 / 设计品质 / 设计倾向三级 references 读进上下文。
-  纯加载器：本 Skill 不含任何设计方法论，方法论本体在被读取的 references 文件内。
+  设计知识统一加载器。**references 的唯一加载入口**——按【当前设计阶段 + roomType】
+  把恰好够用的设计参考文件读进上下文，不多读（省上下文）、不少读（缺判据）。
+  调用方只告知阶段与房型，无需知道任何文件名（文件清单只在本 Skill 维护）。
+  references 随本 Skill 目录发布（`references/` 子目录），非项目挂载。
 allowed-tools: Read
 ---
 
-# 加载设计知识
+# 加载设计知识（阶段感知 · 房型感知）
 
-本 Skill 只做一件事：**把指定层级的设计 references 文件读进上下文**。它不解释、不裁剪、不补充任何设计规则——规则本体在被读取的 `.md` / `.json` 文件里。
+本 Skill 只做一件事：**按你当前所处的设计阶段 + 房间类型，Read 对应的设计参考文件**。它不解释、不裁剪、不补充——规则本体在被读取的 `.md` 里。**它是 references 的唯一加载入口**：别的 skill/agent 不直接 Read references、不写参考文件名，只调用本 Skill 并告知阶段。
 
 ## 入参
 
-调用时在 args 中给出：
+调用时告知（或由你按当前任务判断）：
+- `stage`：`感知` | `规划推演` | `多方案` | `落地`
+- `roomType`：`bedroom` | `bathroom` | `livingroom`
 
-- `level`：`L1` | `L2` | `L3`
-- `roomType`：`bedroom` | `bathroom` | `livingroom`（决定读哪份房间策略文件）
+## 阶段 → 读哪些（**按阶段只读够用的，不要全量**）
 
-## 加载清单（按 level 读取，路径相对当前项目目录）
+文件都在**本 Skill 同目录的 `references/` 子目录**（路径 = 本 skill 根 + `/references/<file>`）。`{roomType}.md` = `bedroom.md` / `bathroom.md` / `livingroom.md` 之一。
 
-所有文件用 `Read` 工具逐个读入。**高层级包含低层级的全部文件**。
+| stage | Read 入 | 为什么这样切 |
+|-------|--------|------------|
+| **感知**（读空间 / 定调） | `references/spatial_design.md` + `references/design_evaluation.md` | 用品质维度作空间阅读判据；此阶段**房型中立、不放家具** → 不读放置法则 / 房型范式 / 模块库 |
+| **规划推演**（分区 + 顺序） | `references/spatial_design.md` + `references/furniture_placement.md` + `references/{roomType}.md` | 组织空间 + 通用放置法则 + 房型选墙范式 |
+| **多方案**（差异化生成） | `references/furniture_placement.md` + `references/{roomType}.md` + `references/design_evaluation.md` | 主家具清单/法则 + 合格底线判据 |
+| **落地**（施工 + 自评 + 自优化） | `references/spatial_design.md` + `references/furniture_placement.md` + `references/{roomType}.md` + `references/design_evaluation.md` + **`projectMount/modules/module_library.json`** | 落地需全量：法则 + 房型 + 物本体 + 识图维度 |
 
-### L1 — 工程合规
+> `module_library.json` 例外：它是家具物本体、被 validators/Web 等非 AI 方共用，**留在项目 `projectMount/modules/`**，不在本 Skill 目录；落地阶段从项目路径读它。
 
-- `references/空间设计.md` —— 怎么读空间（动线/采光/安静度）+ 怎么组织空间（分区法则）
-- `references/家具放置.md` —— 家具放置通用法则（墙面归属/通道/顶角/填满/依赖）
-- `references/{roomType}.md` —— 即 `references/bedroom.md` / `references/bathroom.md` / `references/livingroom.md` 之一
-- `modules/module_library.json`
+## 纪律
 
-### L2 — 设计品质（= L1 全部 + 下列）
-
-- `references/design_evaluation.md`
-
-### L3 — 设计倾向（= L2 全部 + 下列）
-
-- 地方 / 集团设计标准文件（当前为空）
-
-> L3 当前无对应文件：若目录下不存在地方/集团标准文件，跳过、不报错，按 L2 结果继续。
-
-## 完成
-
-读完对应层级的全部文件即结束。**不要**在本 Skill 内对读到的内容做总结、改写或推理——把原文留给调用方的 agent 使用。
+- **只读、不加工**：把原文留给调用方的 agent 使用，不在本 Skill 内总结/改写/推理。
+- **渐进累积**：主控为脑下，一次设计会顺序经历多个阶段（感知→规划→多方案）——**前一阶段已读过的文件不必重读**，按阶段增量补读即可。这正是分阶段加载的意义：每阶段上下文只装该阶段够用的判据，不一次塞满。
+- **不存在的层级**：旧 `L1/L2/L3` 参数已废除（实测只用一档、L3 恒空）——改用上表的 `stage`。
