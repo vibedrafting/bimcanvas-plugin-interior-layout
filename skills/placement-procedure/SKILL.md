@@ -34,7 +34,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 **其余决策由你全局重判**：主家具选墙、是否 L 形、可选家具位置、模块阵列、留白——在锚点约束下按房间策略自由判断。附属/跟随家具（床头柜/窗帘等）按方案草稿 + 房间策略补全。
 
-1. **【必须】**通过 `Skill` 加载 `load-design-knowledge`（**`stage: 落地`**，`roomType` 按房间类型）—— 注入该阶段全部设计知识（放置法则 + 房型范式 + 识图维度 + module_library 物本体）；（闭合预检/修正阶梯/自改图边界=施工方法，方法体已内联本 skill Step C/E）。
+1. **【必须】**通过 `Skill` 加载 `load-design-knowledge`（按【落地】阶段取对应 references）—— 注入该阶段全部设计知识（放置法则 + 房型范式 + 识图维度 + module_library 物本体）；（闭合预检/修正阶梯/自改图边界=施工方法，方法体已内联本 skill Step C/E）。
 2. 上游材料：**调用方已附（空间骨架/方案草稿等）时直接使用，免读盘**；未附时 Read 设计区父 `DESIGN.md`。
 3. `mcp__interior-layout__get_zone_boundaries({ zoneIds: [designZoneId] })` —— 取边界/passage/exclusions 几何。
 4. `mcp__canvas__canvas_vision` 用法口径（Step F 自评必用）：**识图模式·必传 `prompt`**（deepseek 无 vision，识图服务返回文字 `resultText`）。**【截图范围·禁 room 模式】**截本方案：传 `projectPath` + `prompt` + `variantId:"{slug}"` + `viewport:{mode:"zone", zoneId:"<目标叶子或 designZoneId>"}`（缺 zoneId 报错）。**禁** `viewport.mode=room`/`roomId`（`rz_*`/`dz_*` 是 zone id 非物理房间 id，必报 `Room not found`）。图源与截图范围二选一。

@@ -22,7 +22,7 @@ allowed-tools: Read, Skill, AskUserQuestion
 
 ## 入场读取
 
-调用方给出 `designZoneId` 与用户诉求。**已附上游材料（空间骨架 + 双思维草稿）时直接使用，免读父 DESIGN.md**；未附时读父 `DESIGN.md`「用户诉求 + 项目基础信息」「设计区空间骨架」「方案草稿」。通过 `Skill` 加载 `load-design-knowledge`（`stage: 多方案`，`roomType`）——**从房间策略取本房型的主家具清单与各家具墙面判据**（卧室：床/衣柜；卫生间：台盆/淋浴/马桶；客厅：沙发/电视柜；按实际 roomType 取）。每变体 `narrative` **≤8 行**（narrative 是方向 WHY，不是方案书）。
+调用方给出 `designZoneId` 与用户诉求。**已附上游材料（空间骨架 + 双思维草稿）时直接使用，免读父 DESIGN.md**；未附时读父 `DESIGN.md`「用户诉求 + 项目基础信息」「设计区空间骨架」「方案草稿」。通过 `Skill` 加载 `load-design-knowledge`（按【多方案】阶段取对应 references）——**从房间策略取本房型的主家具清单与各家具墙面判据**（卧室：床/衣柜；卫生间：台盆/淋浴/马桶；客厅：沙发/电视柜；按实际 roomType 取）。每变体 `narrative` **≤8 行**（narrative 是方向 WHY，不是方案书）。
 
 ## 协创（opt-in·默认可跳，不破坏自主流）
 

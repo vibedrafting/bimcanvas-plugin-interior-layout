@@ -22,7 +22,7 @@ allowed-tools: Read, Skill, mcp__interior-layout__get_zone_boundaries
 
 ## 入场读取
 
-调用方给出 `designZoneId`。**已附上游材料（空间骨架）时直接使用，免读父 DESIGN.md**；未附时读父 `DESIGN.md`「设计区空间骨架」节。通过 `Skill` 加载 `load-design-knowledge`（`stage: 规划推演`，`roomType`）；必要时调 `get_zone_boundaries` 取边界/passage。**基于已有空间骨架做分区评估——不重新推导空间信息、不重做主家具墙面决策。** 草稿子段 **≤30 行**（中间产物双倍收费，写结论与关键差异）。
+调用方给出 `designZoneId`。**已附上游材料（空间骨架）时直接使用，免读父 DESIGN.md**；未附时读父 `DESIGN.md`「设计区空间骨架」节。通过 `Skill` 加载 `load-design-knowledge`（按【规划推演】阶段取对应 references）；必要时调 `get_zone_boundaries` 取边界/passage。**基于已有空间骨架做分区评估——不重新推导空间信息、不重做主家具墙面决策。** 草稿子段 **≤30 行**（中间产物双倍收费，写结论与关键差异）。
 
 ## 分区方法
 

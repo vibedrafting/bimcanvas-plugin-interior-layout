@@ -45,7 +45,7 @@ schemes/{designZoneId}/
 
 > 🔴 **感知的视觉一律经 `perception-method` 的识图模式（传 prompt 取文字结论）**；**禁在加载 `perception-method` 前自行调 `canvas_vision` 截图、禁裸 `Read` 截图 PNG**——主控无 vision，读 PNG 看不见、只把上百 KB 图像灌进上下文污染推理（实测一次浪费 ~150K 字符，且"看到 L 形"实为坐标推断的幻觉）。
 
-1. `Skill` 加载 `load-design-knowledge`(`stage: 感知`,`roomType` 按设计区房间类型)+ `perception-method`。
+1. `Skill` 加载 `load-design-knowledge`（按【感知】阶段取对应 references）+ `perception-method`。
 2. 按 `perception-method` 完成 §1 战略定调 + §2 空间骨架,产出 `strategySec`(## 用户诉求 + 项目基础信息)与 `spaceSec`(## 设计区空间骨架)两节。
 3. `Skill` 加载 `design-doc-upsert`,把两节幂等写入父 `DESIGN.md`。
 4. （可打断）关键战略选择点 / 锚点歧义 / 诉求与户型矛盾,可按需 `AskUserQuestion` 征询用户;默认不暂停,标 `[自动代决]` 续跑。

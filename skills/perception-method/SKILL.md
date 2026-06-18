@@ -30,7 +30,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 1. Read 当前项目 `README.md`（意图理解与材料定位）；若设计区父 `schemes/{designZoneId}/DESIGN.md` 已存在，读取已有上下文（不覆盖）；必要时 `Glob` 定位项目级冻结配置（只读）。
 2. `mcp__interior-layout__get_zone_boundaries({ zoneIds: [designZoneId] })` —— 取设计区边界 / passage 几何。
 3. `mcp__canvas__canvas_vision`（**识图模式·传 prompt**）—— 取当前户型的**文字视觉证据**（deepseek 无 vision，必须传 `prompt` 让识图服务返回 `resultText`）。**【截图范围·禁 room 模式】**`designZoneId`（`rz_*`/`dz_*`）是 zone id 非物理房间 id——传 `projectPath` + `prompt` + `viewport:{mode:"zone", zoneId:"<designZoneId>"}`；**禁** `viewport.mode=room`/`roomId`（必报 `Room not found`）；图源与截图范围二选一。
-4. 通过 `Skill` 加载 `load-design-knowledge`（`stage: 感知`，`roomType` 按设计区房间类型）——取品质维度（load-design-knowledge 注入）作为空间阅读判据。
+4. 通过 `Skill` 加载 `load-design-knowledge`（按【感知】阶段取对应 references）——取品质维度（load-design-knowledge 注入）作为空间阅读判据。
 
 ## §1 战略定调（产出 strategySec）
 
