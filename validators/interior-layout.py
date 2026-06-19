@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import time
 from typing import Optional
 
@@ -56,6 +57,10 @@ E_INVALID_MODULE_ID = "E011_INVALID_MODULE_ID"
 E_INVALID_BOUNDS = "E012_INVALID_BOUNDS"
 E_INVALID_MODULE_FILE_PATH = "E013_INVALID_MODULE_FILE_PATH"
 E_DUPLICATE_ZONE_MODULE_FILES = "E014_DUPLICATE_ZONE_MODULE_FILES"
+E_REGION_UNREACHABLE = "E015_REGION_UNREACHABLE"  # 连通性硬闸：门/子区被家具封死=不可达
+
+REACH_MIN_PASSAGE_MM = 600.0       # 可达底线（次通道/到子区·次门）；主通道 900 属 Layer2 软、不入硬闸
+REACH_AREA_FLOOR_MM2 = 100000.0    # 连通块显著性地板（0.1m²），滤 buffer 碎片/噪声
 
 # ZoneType 兼容：注入数据走整数（C# 业务 enum 整数序列化）；旧 on-disk 数据可能用 camelCase 字符串。
 # 两种表示都兼容，避免 zoneGeometry / 历史文件混用时静默漏判。
@@ -186,6 +191,8 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
     # 5) 几何校验（E001–E005）
     all_diags.extend(_validate_scheme(valid_modules, design_zones, exclusion_zones,
                                       walls, columns, target_raw))
+    # 6) 连通性硬闸（E015）：家具不得封死门 / 子区可达，各区 ≥600mm 可达（填 validate 拓扑盲区）
+    all_diags.extend(_validate_reachability(valid_modules, design_zones, exclusion_zones, target_raw))
 
     total_modules = len(valid_modules) + skipped
     elapsed = int((time.perf_counter() - t0) * 1000)
@@ -410,6 +417,105 @@ def _overlap_diag(diags: list[dict], m: dict, mb, obstacle, code: str,
                        m.get("id", ""), _name_or_none(m),
                        conflict_id, conflict_type,
                        info["area_mm2"], info["depth_mm"], info["direction"]))
+
+
+# ── E015 连通性硬闸（北极星：填 validate 拓扑盲区，禁"床封死主卫"类灾难）──
+def _validate_reachability(modules: list[dict], design_zones: list[dict],
+                           exclusion_zones: list[dict], target_raw: Optional[set]) -> list[dict]:
+    """家具不得把设计区可走空地切成不可达孤岛，且各区 ≥600mm 可达。
+
+    纯 shapely 矢量（Path 1·域内）：
+      free = 设计区多边形 − union(家具 footprint) − union(禁区)。
+      ① 鲁棒底·全封死：free 显著连通块数 > 设计区原连通块数 → 有被封死孤岛（门/子区开口被盖死）→ E015。
+      ② ≥600mm 精度：free 连通但 buffer(-300) 后显著块数变多 → 仅靠 <600mm 窄口相连 → E015。
+    shapely 不可用 / 几何异常 → 静默跳过（不阻断 validate；其余 E001–E014 仍承担）。
+    """
+    try:
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+    except Exception as exc:  # noqa: BLE001 —— 连通性是增量硬闸，依赖缺失不得阻断既有校验
+        print(f"[interior-layout] E015 跳过：shapely 不可用 ({exc})", file=sys.stderr, flush=True)
+        return []
+
+    def _poly(bounds):
+        try:
+            shell, holes = geometry._coerce_rings(bounds)
+            if not shell or len(shell) < 3:
+                return None
+            p = Polygon(shell, holes or None)
+            if not p.is_valid:
+                p = p.buffer(0)
+            return p if (not p.is_empty and p.area > 0) else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _pieces(geom) -> int:
+        if geom is None or geom.is_empty:
+            return 0
+        geoms = getattr(geom, "geoms", None)
+        items = list(geoms) if geoms is not None else [geom]
+        return sum(1 for g in items if (not g.is_empty) and g.area > REACH_AREA_FLOOR_MM2)
+
+    room_polys = []
+    for z in design_zones:
+        if _zone_type(z) not in (ZONE_ROOM, ZONE_DESIGNABLE):
+            continue
+        if target_raw is not None and z.get("id") not in target_raw:
+            continue
+        b = z.get("computedBoundary") or z.get("rawBoundary")
+        p = _poly(b) if b is not None else None
+        if p is not None:
+            room_polys.append(p)
+    if not room_polys:
+        return []
+    room = unary_union(room_polys)
+    room_n = _pieces(room)
+    if room_n == 0:
+        return []
+
+    obstacles = []
+    for m in modules:
+        p = _poly(m.get("bounds"))
+        if p is not None:
+            obstacles.append(p)
+    for z in exclusion_zones:
+        if _zone_type(z) != ZONE_EXCLUSION:
+            continue
+        b = z.get("rawBoundary") or z.get("computedBoundary")
+        p = _poly(b) if b is not None else None
+        if p is not None:
+            obstacles.append(p)
+
+    try:
+        free = room.difference(unary_union(obstacles)) if obstacles else room
+    except Exception as exc:  # noqa: BLE001
+        print(f"[interior-layout] E015 跳过：free 计算失败 ({exc})", file=sys.stderr, flush=True)
+        return []
+    free_n = _pieces(free)
+
+    # ① 全封死（不用 buffer、不用门坐标；北案床封喉时 NE 翼成孤岛、必中）
+    if free_n > room_n:
+        return [_diag(
+            E_REGION_UNREACHABLE, "error",
+            f"家具把设计区可走空地切成了 {free_n} 块互不连通的区域（设计区本应连通为 {room_n} 块）"
+            "——存在被封死、走不到的孤岛（门 / 子区唯一开口被家具盖死，如主卫 / 凹角延伸翼不可达）。"
+            "请改主家具墙面 / 位置，别让它的端缘压住通往别处的开口线。",
+            "", None)]
+
+    # ② ≥600mm 精度：free 连通但 600mm 通行下被 <600mm 窄口切分
+    try:
+        eroded = free.buffer(-REACH_MIN_PASSAGE_MM / 2.0)
+    except Exception:  # noqa: BLE001
+        eroded = None
+    if eroded is not None and _pieces(eroded) > free_n:
+        return [_diag(
+            E_REGION_UNREACHABLE, "error",
+            f"设计区内存在仅靠 <{int(REACH_MIN_PASSAGE_MM)}mm 窄口相连的区域"
+            f"——按 {int(REACH_MIN_PASSAGE_MM)}mm 通行核验被切成多块，某区 / 门可达性不足"
+            f"（次通道底线 ≥{int(REACH_MIN_PASSAGE_MM)}mm；放宽该处通行口或挪开压口家具）。",
+            "", None)]
+
+    return []
 
 
 # ── bounds 结构预检（镜像 GetBoundsStructureError）──────────────
