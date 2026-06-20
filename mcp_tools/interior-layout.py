@@ -1,31 +1,24 @@
 """interior-layout plugin MCP 工具入口。
 
-4 个 interior-layout 专属工具,通过 `register(builder)` 范式注册:
-- save_semantic_plan / load_semantic_plan (语义方案标签管理)
-- save_reference_analysis / load_reference_analysis (参考分析快照管理)
+当前仅 1 个 domain 工具,通过 `register(builder)` 范式注册:
+- get_zone_boundaries (读取 zone 边界段语义)
 
-**业务下沉(Server 业务下沉与契约重订)**:
-indoor-layout domain 业务(tag 白名单 / canonical-only / planType 启发式 / effectiveTag 优先级 /
-merge view / next reference tag / LegacyEmbedded 兼容)原嵌在 BIMCanvas Server 的
-`SemanticPlanController.cs`(~670 行)。现已撤回 plugin:
-- 业务判定在 `lib/business.py`(纯函数,无 ctx/HTTP)
-- 工具体只做 IO:调 business 校验 + 调 Server **通用 artifact 端点**(scene-agnostic)
-  (GET `/api/scheme/artifacts/{kind}?path=` 精确读 / POST `/api/scheme/artifacts/{kind}` 写)
-- Server 不再持有任何 indoor-layout 业务,只做通用文件 IO + baseline/computed 只读 gate
+**退役说明(指针模型 + workflow 重构)**:
+原本本插件含 4 个工具——`save/load_semantic_plan`、`save/load_reference_analysis`——承载语义方案 /
+参考分析的标签管理与合并视图。指针模型上线后,设计意图改落 `DESIGN.md`(普通 Read/Write/Edit),
+不再用 semantic_plan / reference_analysis 的 JSON 合同,这 4 个工具及其 `lib/business.py` 业务逻辑
+已整体删除。几何 / 碰撞 / 边界校验走平台 `mcp__canvas__validate_layout`(委派本插件 `validators/`)。
 
-数据落点(按物理 zone 组织):
-- canonical:schemes/{zoneId}/semantic_plan.json | reference_analysis.json
-- variant:schemes/{zoneId}/variants/{variantId}/semantic_plan.json
-- path 子段由工具体拼装(zoneId 或 zoneId/variants/{variantId}),Server 按 path 落 schemes/{path}/。
-
-文件格式与旧 SemanticPlanController 保持一致(PascalCase Entries/Tag/PlanType/...),
-双轨期内两套实现读写同一文件不冲突。
+设计纪律(SDK register 范式):不读 `builder.context` 字段、不做 `isinstance` 断言;
+一切副作用挪到 tool handler 内运行。domain 业务判定在 `lib/business.py`(纯函数,无 ctx / HTTP)。
 """
 
 from __future__ import annotations
 
 import importlib.util as _importlib_util
 import json
+import os
+import shutil
 from pathlib import Path as _Path
 from typing import Any
 
@@ -64,457 +57,19 @@ def _error(message: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": message}], "is_error": True}
 
 
-def _error_struct(status: str, message: str, **extra: Any) -> dict[str, Any]:
-    data: dict[str, Any] = {"status": status, "message": message}
-    data.update(extra)
-    return {
-        "content": [{"type": "text", "text": message}],
-        "structuredContent": data,
-        "is_error": True,
-    }
-
-
 # ============================================================
-# Server 通用 artifact 端点 IO helper
+# 文件落盘 helper(副作用,handler 专用;纯逻辑在 lib/business.py)
 # ============================================================
 
-async def _load_artifact(ctx: Any, scene_id: str, kind: str,
-                         path: str) -> tuple[int, Any, str]:
-    """GET 精确读单文件 schemes/{path}/{kind}.json(scene-agnostic)。
-
-    返回 (status, parsed_json_or_none, raw_text)。连接失败 status=-1。
-    scene_id 形参保留兼容调用方,回退后不进 URL(数据按物理 zone 组织)。
-    """
-    url = f"{ctx.server_url}/api/scheme/artifacts/{kind}"
-    try:
-        async with ctx.session.get(url, params={"path": path}) as resp:
-            raw = await resp.text()
-            if resp.status == 200:
-                try:
-                    return 200, json.loads(raw), raw
-                except json.JSONDecodeError:
-                    return 200, None, raw
-            return resp.status, None, raw
-    except aiohttp.ClientError as e:
-        return -1, None, f"无法连接 Server: {e}"
-
-
-async def _save_artifact(ctx: Any, scene_id: str, kind: str, path: str,
-                         content: Any) -> tuple[bool, str | None]:
-    """POST 写单文件 schemes/{path}/{kind}.json(scene-agnostic)。返回 (ok, error_text)。
-
-    scene_id 形参保留兼容调用方,回退后不进 URL。
-    """
-    url = f"{ctx.server_url}/api/scheme/artifacts/{kind}"
-    try:
-        async with ctx.session.post(url, json={"path": path, "content": content}) as resp:
-            if resp.status == 200:
-                return True, None
-            return False, await resp.text()
-    except aiohttp.ClientError as e:
-        return False, f"无法连接 Server: {e}"
-
-
-async def _read_reference_entries(ctx: Any, scene_id: str, zone_id: str) -> list[dict[str, Any]]:
-    """读 reference_analysis 历史 entries;空时 fallback 到 semantic_plan canonical 的 LegacyEmbedded。
-
-    复刻 ReadReferenceAnalysisEntries。reference_analysis 无 variant 概念,path 永远是 canonical zoneId。
-    """
-    status, entries, _ = await _load_artifact(ctx, scene_id, "reference_analysis", zone_id)
-    if status == 200 and isinstance(entries, list):
-        return entries
-
-    s2, doc, _ = await _load_artifact(ctx, scene_id, "semantic_plan", zone_id)
-    if s2 == 200 and isinstance(doc, dict):
-        return biz.legacy_embedded_to_entries(doc)
-    return []
-
-
-async def _strip_canonical_legacy_embedded(ctx: Any, scene_id: str, zone_id: str) -> None:
-    """清 canonical semantic_plan 的 LegacyEmbedded 字段(复刻 RemoveLegacyEmbeddedReferenceAnalysisAsync)。"""
-    status, doc, _ = await _load_artifact(ctx, scene_id, "semantic_plan", zone_id)
-    if status == 200 and isinstance(doc, dict) and biz.strip_legacy_embedded(doc):
-        await _save_artifact(ctx, scene_id, "semantic_plan", zone_id, doc)
-
-
-def _semantic_subpath(zone_id: str, variant_id: str | None) -> str:
-    """canonical → zoneId;variant → zoneId/variants/{variantId}。"""
-    if variant_id:
-        return f"{zone_id}/variants/{variant_id}"
-    return zone_id
+def _write_text(path: str, content: str) -> None:
+    """UTF-8(无 BOM)写文本,newline="" 不做 \\n→\\r\\n 转换,保字节级一致。"""
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(content)
 
 
 def register(builder: McpServerBuilder) -> None:
     """interior-layout plugin 注册入口。"""
     ctx = builder.context
-
-    # ---------- save_semantic_plan ----------
-    @builder.tool(
-        "save_semantic_plan",
-        "保存语义方案标签。在规划阶段的每个子阶段（2.1/2.2/2.3）完成后调用，提交当前标签的语义方案。"
-        "可选 variantId 用于写入变体路径；spatial-skeleton / multi-plan-overview 是 canonical 全局单 owner，禁止与 variantId 同时传入。",
-        {
-            "$schema": "http://json-schema.org/draft-07/schema#",
-            "type": "object",
-            "properties": {
-                "zoneId": {
-                    "type": "string",
-                    "description": "目标 Zone ID，如 'rz_3'",
-                },
-                "tag": {
-                    "type": "string",
-                    "enum": ["spatial-skeleton", "strategic-plan", "multi-plan-overview", "construction-brief"],
-                    "description": "语义方案标签：spatial-skeleton=空间骨架, strategic-plan=战略层方案, multi-plan-overview=多方案概述, construction-brief=完整施工简报",
-                },
-                "planType": {
-                    "type": "string",
-                    "enum": ["derived"],
-                    "description": "图纸类型：当前正式流程统一为 derived；旧的 reference 仅用于识别历史数据。",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "语义方案文本内容（markdown 格式）",
-                },
-                "referenceAnalysisTag": {
-                    "type": "string",
-                    "description": "可选。若当前方案消费了定稿 reference_analysis，记录对应的标签（如 v3 / v4）。",
-                },
-                "variantId": {
-                    "type": "string",
-                    "description": "可选。非空时写变体路径 schemes/{zoneId}/variants/{variantId}/semantic_plan.json；为空时写 canonical。"
-                                   "**spatial-skeleton / multi-plan-overview 禁止传 variantId**（这两个 tag 全局只在 canonical 出现）。"
-                                   "Phase 1 暂无调用方需要传入；预留给后续 multi-plan / variant-design-agent。",
-                },
-            },
-            "required": ["zoneId", "tag", "planType", "content"],
-            "additionalProperties": False,
-        },
-    )
-    async def save_semantic_plan(args: dict[str, Any]) -> dict[str, Any]:
-        zone_id = args["zoneId"]
-        tag = args["tag"]
-        content = args["content"]
-        reference_analysis_tag = args.get("referenceAnalysisTag")
-        variant_id = args.get("variantId")
-
-        scene_id = ctx.active_scene
-
-        # 业务校验(tag 白名单 / planType / variantId charset / canonical-only)
-        try:
-            normalized_plan_type = biz.validate_save_semantic_plan(zone_id, tag, args["planType"], variant_id)
-        except biz.BusinessError as e:
-            return _error(str(e))
-
-        sub_path = _semantic_subpath(zone_id, variant_id)
-
-        # 读现有 doc
-        status, doc, raw = await _load_artifact(ctx, scene_id, "semantic_plan", sub_path)
-        if status not in (200, 404):
-            return _error(f"读取现有语义方案失败: {raw}")
-        if status == 404 or not isinstance(doc, dict):
-            doc = {"Entries": []}
-
-        entries = doc.get("Entries") or []
-
-        # 仅 canonical 清理 legacy embedded(变体目录从无 legacy 数据)
-        if not variant_id:
-            biz.strip_legacy_embedded(doc)
-
-        entry = biz.build_semantic_plan_entry(zone_id, tag, normalized_plan_type, content, reference_analysis_tag)
-        doc["Entries"] = biz.upsert_entry(entries, entry)
-
-        ok, err = await _save_artifact(ctx, scene_id, "semantic_plan", sub_path, doc)
-        if not ok:
-            return _error(f"保存失败: {err}")
-
-        ref_tag = entry.get("ReferenceAnalysisTag")
-        suffix = f"（reference={ref_tag}）" if ref_tag else ""
-        return _text(f"语义方案 {normalized_plan_type} {tag} 已保存{suffix}。继续下一阶段。")
-
-    # ---------- load_semantic_plan ----------
-    @builder.tool(
-        "load_semantic_plan",
-        "加载当前设计区的生效语义方案。返回当前可施工图纸，而不是完整历史。"
-        "传 variantId 时返回 merge view（canonical 的 spatial-skeleton + 变体的 strategic-plan/construction-brief entries）。",
-        {
-            "$schema": "http://json-schema.org/draft-07/schema#",
-            "type": "object",
-            "properties": {
-                "zoneId": {
-                    "type": "string",
-                    "description": "目标 Zone ID，如 'rz_3'",
-                },
-                "variantId": {
-                    "type": "string",
-                    "description": "可选。非空时返回 merge view（canonical 的 spatial-skeleton + 变体的 strategic-plan/construction-brief entries）；effectiveTag 落在变体的合同上。"
-                                   "Phase 1 暂无调用方需要传入；预留给后续 multi-plan / variant-design-agent。",
-                },
-            },
-            "required": ["zoneId"],
-            "additionalProperties": False,
-        },
-    )
-    async def load_semantic_plan(args: dict[str, Any]) -> dict[str, Any]:
-        zone_id = args["zoneId"]
-        variant_id = args.get("variantId")
-
-        scene_id = ctx.active_scene
-
-        if not biz.is_design_zone_id(zone_id):
-            return _error("semantic_plan 只归属于设计区，不归属于子分区。请传入父设计区 zoneId。")
-
-        # variantId 非空 → merge view 分支
-        if variant_id:
-            try:
-                biz.ensure_safe_variant_id(variant_id)
-            except biz.BusinessError as e:
-                return _error(str(e))
-            return await _load_semantic_plan_merge_view(scene_id, zone_id, variant_id)
-
-        # canonical 分支
-        status, doc, raw = await _load_artifact(ctx, scene_id, "semantic_plan", zone_id)
-        if status == 404 or not isinstance(doc, dict):
-            return _error_struct("missing", f"未找到 {zone_id} 的语义方案", zoneId=zone_id)
-        if status != 200:
-            return _error(f"加载失败: {raw}")
-
-        entries = doc.get("Entries") or []
-        if not entries:
-            return _error_struct("missing", f"{zone_id} 的语义方案为空", zoneId=zone_id)
-
-        ok, plan_type = biz.try_resolve_plan_type(entries)
-        if not ok:
-            return _error_struct(
-                "ambiguous_legacy",
-                f"{zone_id} 的旧语义方案无法自动判定 planType，请重新规划或由主控 Agent 介入确认。",
-                zoneId=zone_id,
-            )
-
-        target = biz.resolve_canonical_target(entries)
-        if target is None:
-            if plan_type == biz.PLAN_TYPE_REFERENCE:
-                return _error_struct(
-                    "legacy_reference_requires_replan",
-                    f"{zone_id} 当前仍是旧版 reference 工作流（缺少可施工的 construction-brief 自包含合同）。请重新执行规划。",
-                    zoneId=zone_id,
-                )
-            return _error_struct(
-                "missing",
-                f"未找到 {zone_id} 的生效图纸 construction-brief",
-                zoneId=zone_id,
-            )
-
-        data = {
-            "status": "ok",
-            "zoneId": target.get("ZoneId"),
-            "planType": plan_type,
-            "effectiveTag": target.get("Tag"),
-            "content": target.get("Content"),
-            "timestamp": target.get("Timestamp"),
-            "referenceAnalysisTag": target.get("ReferenceAnalysisTag"),
-        }
-        return _semantic_plan_ok_result(data)
-
-    async def _load_semantic_plan_merge_view(scene_id: str, zone_id: str,
-                                             variant_id: str) -> dict[str, Any]:
-        """复刻 LoadSemanticPlanMergeView:canonical.spatial-skeleton + 变体 entries。"""
-        variant_path = f"{zone_id}/variants/{variant_id}"
-        status_v, variant_doc, raw_v = await _load_artifact(ctx, scene_id, "semantic_plan", variant_path)
-        if status_v == 404 or not isinstance(variant_doc, dict):
-            return _error_struct(
-                "missing",
-                f"未找到变体语义方案 schemes/{zone_id}/variants/{variant_id}/semantic_plan.json",
-                zoneId=zone_id, variantId=variant_id,
-            )
-        if status_v != 200:
-            return _error(f"加载变体语义方案失败: {raw_v}")
-
-        status_c, canonical_doc, _ = await _load_artifact(ctx, scene_id, "semantic_plan", zone_id)
-        canonical_entries = (canonical_doc.get("Entries") if (status_c == 200 and isinstance(canonical_doc, dict)) else None) or []
-        variant_entries = variant_doc.get("Entries") or []
-
-        merged, canonical_skeleton = biz.merge_view(canonical_entries, variant_entries)
-        if not merged:
-            return _error_struct(
-                "missing",
-                f"变体 {variant_id} 的语义方案为空（且 canonical 未提供 spatial-skeleton）",
-                zoneId=zone_id, variantId=variant_id,
-            )
-
-        target = biz.resolve_effective_entry(merged, biz.MERGE_EFFECTIVE_PRIORITY)
-        if target is None:
-            return _error_struct(
-                "missing",
-                f"变体 {variant_id} 未提供任何已知 tag 的语义方案",
-                zoneId=zone_id, variantId=variant_id,
-            )
-
-        ok, plan_type = biz.try_resolve_plan_type(merged)
-        if not ok:
-            return _error_struct(
-                "ambiguous_legacy",
-                f"{zone_id}/variants/{variant_id} 的语义方案 planType 不一致，无法解析。",
-                zoneId=zone_id, variantId=variant_id,
-            )
-
-        warning = None if canonical_skeleton is not None else "canonical spatial-skeleton missing"
-        data = {
-            "status": "ok",
-            "zoneId": zone_id,
-            "variantId": variant_id,
-            "planType": plan_type,
-            "effectiveTag": target.get("Tag"),
-            "content": target.get("Content"),
-            "timestamp": target.get("Timestamp"),
-            "referenceAnalysisTag": target.get("ReferenceAnalysisTag"),
-            "entries": [
-                {
-                    "zoneId": e.get("ZoneId"),
-                    "tag": e.get("Tag"),
-                    "planType": e.get("PlanType"),
-                    "content": e.get("Content"),
-                    "timestamp": e.get("Timestamp"),
-                    "referenceAnalysisTag": e.get("ReferenceAnalysisTag"),
-                }
-                for e in merged
-            ],
-            "warning": warning,
-        }
-        return _semantic_plan_ok_result(data)
-
-    def _semantic_plan_ok_result(data: dict[str, Any]) -> dict[str, Any]:
-        """复刻原 load_semantic_plan 工具的 LLM 输出文本 + structuredContent。"""
-        text_parts = [
-            f"status: {data['status']}",
-            f"zoneId: {data['zoneId']}",
-            f"planType: {data['planType']}",
-            f"effectiveTag: {data['effectiveTag']}",
-            f"timestamp: {data['timestamp']}",
-        ]
-        if data.get("referenceAnalysisTag"):
-            text_parts.append(f"referenceAnalysisTag: {data['referenceAnalysisTag']}")
-        text_parts.append(f"\n{data['content']}")
-        return {
-            "content": [{"type": "text", "text": "\n".join(text_parts)}],
-            "structuredContent": data,
-        }
-
-    # ---------- load_reference_analysis ----------
-    @builder.tool(
-        "load_reference_analysis",
-        "加载当前设计区的参考分析。默认返回最新标签；可选 tag 参数读取指定标签。",
-        {
-            "$schema": "http://json-schema.org/draft-07/schema#",
-            "type": "object",
-            "properties": {
-                "zoneId": {
-                    "type": "string",
-                    "description": "目标 Zone ID，如 'rz_3'",
-                },
-                "tag": {
-                    "type": "string",
-                    "description": "可选。指定参考分析标签，如 'v1'；不传则返回最新标签。",
-                },
-            },
-            "required": ["zoneId"],
-            "additionalProperties": False,
-        },
-    )
-    async def load_reference_analysis(args: dict[str, Any]) -> dict[str, Any]:
-        zone_id = args["zoneId"]
-        tag = args.get("tag")
-
-        scene_id = ctx.active_scene
-
-        if not biz.is_design_zone_id(zone_id):
-            return _error("reference_analysis 只归属于设计区，不归属于子分区。请传入父设计区 zoneId。")
-
-        entries = await _read_reference_entries(ctx, scene_id, zone_id)
-        if not entries:
-            return _error_struct("missing", f"未找到 {zone_id} 的参考分析", zoneId=zone_id)
-
-        target = biz.resolve_reference_target(entries, tag)
-        if target is None:
-            return _error_struct(
-                "missing",
-                f"未找到 {zone_id} 的参考分析 {tag}",
-                zoneId=zone_id, tag=tag,
-            )
-
-        data = {
-            "status": "ok",
-            "zoneId": zone_id,
-            "tag": target.get("Tag"),
-            "sourceImageId": target.get("SourceImageId", ""),
-            "content": target.get("Content"),
-            "timestamp": target.get("Timestamp"),
-        }
-        text_parts = [
-            f"status: {data['status']}",
-            f"zoneId: {data['zoneId']}",
-            f"tag: {data['tag']}",
-            f"sourceImageId: {data.get('sourceImageId', '')}",
-            f"timestamp: {data['timestamp']}",
-            "",
-            data["content"] or "",
-        ]
-        return {
-            "content": [{"type": "text", "text": "\n".join(text_parts)}],
-            "structuredContent": data,
-        }
-
-    # ---------- save_reference_analysis ----------
-    @builder.tool(
-        "save_reference_analysis",
-        "保存完整参考分析快照。在参考图分析各阶段完成后调用，提交当前标签的完整 Markdown 分析内容。",
-        {
-            "$schema": "http://json-schema.org/draft-07/schema#",
-            "type": "object",
-            "properties": {
-                "zoneId": {
-                    "type": "string",
-                    "description": "目标 Zone ID，如 'rz_3'",
-                },
-                "sourceImageId": {
-                    "type": "string",
-                    "description": "参考图附件 ID（可选）",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "参考分析内容（Markdown 格式），必须是当前阶段的完整、自包含快照",
-                },
-            },
-            "required": ["zoneId", "content"],
-            "additionalProperties": False,
-        },
-    )
-    async def save_reference_analysis(args: dict[str, Any]) -> dict[str, Any]:
-        zone_id = args["zoneId"]
-        content = args["content"]
-        source_image_id = args.get("sourceImageId", "")
-
-        scene_id = ctx.active_scene
-
-        if not biz.is_design_zone_id(zone_id):
-            return _error("reference_analysis 只归属于设计区，不归属于子分区。请传入父设计区 zoneId。")
-
-        # 读历史(含 legacy embedded fallback)→ next tag → append + sort
-        entries = await _read_reference_entries(ctx, scene_id, zone_id)
-        next_tag = biz.next_reference_tag(entries)
-        entries.append(biz.build_reference_entry(next_tag, source_image_id, content))
-        biz.sort_reference_entries(entries)
-
-        ok, err = await _save_artifact(ctx, scene_id, "reference_analysis", zone_id, entries)
-        if not ok:
-            return _error(f"保存失败: {err}")
-
-        # 写完后清 canonical semantic_plan 的 LegacyEmbedded(自愈型,中断下次再触发)
-        await _strip_canonical_legacy_embedded(ctx, scene_id, zone_id)
-
-        return {
-            "content": [{"type": "text", "text": f"参考分析结果已保存为 {next_tag}。"}],
-            "structuredContent": {"saved": True, "zoneId": zone_id, "tag": next_tag},
-        }
 
     # ---------- get_zone_boundaries ----------
     @builder.tool(
@@ -559,5 +114,163 @@ def register(builder: McpServerBuilder) -> None:
                 data = await resp.json()
                 return _text(biz.format_zone_boundaries(data))
 
+        except aiohttp.ClientError as e:
+            return _error(f"无法连接 Server: {e}")
+
+    # ---------- register_variant ----------
+    @builder.tool(
+        "register_variant",
+        "创建方案变体目录骨架:在 schemes/{designZoneId}/ 下建 [_]{slug}/ + DESIGN.md(正文骨架,"
+        "含 summary 一句话) + 按 leafCount 建叶子 modules.json(0/1=单 modules.json;"
+        ">1=建 zones.json 占位 + dz_1..n/modules.json)。返回 leafPaths。",
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["designZoneId", "slug", "leafCount"],
+            "properties": {
+                "designZoneId": {"type": "string", "description": "设计区节点 path(如 rz_3)"},
+                "slug": {"type": "string", "description": "变体 slug,仅 [a-z0-9-]、长度 ≤30"},
+                "visible": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "false→_{slug} 隐藏候选(场景①默认);true→{slug} 可见",
+                },
+                "leafCount": {
+                    "type": "integer",
+                    "description": "0/1=不建叶子(单 modules.json);>1=建 zones.json 占位 + dz_1..n/modules.json",
+                },
+                "summary": {"type": "string", "default": ""},
+                "overwrite": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+    )
+    async def register_variant(args: dict[str, Any]) -> dict[str, Any]:
+        """建方案变体目录骨架(直接文件系统,根 = ctx.project_path)。"""
+        project_path = getattr(ctx, "project_path", None)
+        if not project_path:
+            return _error("当前无加载项目(project_path 为空),无法创建变体目录")
+
+        design_zone_id = args["designZoneId"]
+        slug = args["slug"]
+        visible = bool(args.get("visible", False))
+        leaf_count = int(args["leafCount"])
+        summary = args.get("summary", "") or ""
+        overwrite = bool(args.get("overwrite", False))
+
+        if not biz.is_safe_slug(slug):
+            return _error(f"slug 非法 '{slug}':仅允许 [a-z0-9-]、长度 1..30")
+
+        dz_root = os.path.join(project_path, "schemes", design_zone_id)
+        if not os.path.isdir(dz_root):
+            return _error(f"设计区不存在: {design_zone_id}")
+
+        dir_name = slug if visible else f"_{slug}"
+        variant_root = os.path.join(dz_root, dir_name)
+        if os.path.exists(variant_root):
+            if not overwrite:
+                return _error(f"already-exists: {dir_name}")
+            shutil.rmtree(variant_root)
+        os.makedirs(variant_root, exist_ok=True)
+
+        # 变体级 DESIGN.md:无 frontmatter,正文骨架(裁决 B)
+        _write_text(
+            os.path.join(variant_root, "DESIGN.md"),
+            biz.build_variant_design_md(summary),
+        )
+
+        leaf_paths: dict[str, str] = {}
+        if leaf_count > 1:
+            leaf_ids = [f"dz_{i}" for i in range(1, leaf_count + 1)]
+            # 几何待填占位 zones.json:扁平叶子数组(裁决 A1)
+            _write_text(
+                os.path.join(variant_root, "zones.json"),
+                biz.build_zones_skeleton(leaf_ids),
+            )
+            for leaf_id in leaf_ids:
+                leaf_dir = os.path.join(variant_root, leaf_id)
+                os.makedirs(leaf_dir, exist_ok=True)
+                mpath = os.path.join(leaf_dir, "modules.json")
+                _write_text(mpath, biz.build_modules_skeleton(summary))
+                leaf_paths[leaf_id] = mpath
+        else:
+            mpath = os.path.join(variant_root, "modules.json")
+            _write_text(mpath, biz.build_modules_skeleton(summary))
+            leaf_paths[design_zone_id] = mpath
+
+        return _text(
+            json.dumps(
+                {
+                    "slug": slug,
+                    "dirName": dir_name,
+                    "variantRoot": variant_root,
+                    "leafPaths": leaf_paths,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+
+    # ---------- adopt_variant ----------
+    @builder.tool(
+        "adopt_variant",
+        "采纳收口:胜者目录去 _ 前缀转正(rename,目标存在则报错不覆盖) + 父设计区 "
+        "DESIGN.md frontmatter 写 adopted: {slug}。落选保持 _ 隐藏。",
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["designZoneId", "winnerSlug"],
+            "properties": {
+                "designZoneId": {"type": "string", "description": "设计区节点 path(如 rz_3)"},
+                "winnerSlug": {"type": "string", "description": "胜者 slug,可带或不带 _ 前缀"},
+            },
+            "additionalProperties": False,
+        },
+    )
+    async def adopt_variant(args: dict[str, Any]) -> dict[str, Any]:
+        """采纳收口:转正(_ 去前缀)+ 翻父 DESIGN.md adopted 指针,统一由 C#
+        POST /api/scheme/variant/adopt 唯一落盘——含 SignalR 广播(前端自动 reload)、
+        空方案非空校验、R3 写 gate、designZone 并发锁。本 MCP 仅只读解析磁盘真实目录名后透传,
+        不再自写盘(故无需 Python 字节级对齐 C# frontmatter)。"""
+        project_path = getattr(ctx, "project_path", None)
+        if not project_path:
+            return _error("当前无加载项目(project_path 为空),无法采纳")
+
+        design_zone_id = args["designZoneId"]
+        winner = args["winnerSlug"]
+        promoted = winner[1:] if winner.startswith("_") else winner
+        if not biz.is_safe_slug(promoted):
+            return _error(f"winnerSlug 非法 '{winner}':去前缀后须 [a-z0-9-]、长度 1..30")
+
+        # 只读解析磁盘真实目录名:场景①候选默认隐藏 _{slug}。C# 端点按传入名定位目录、
+        # 不会自动改试 _ 前缀(先按名找、后处理转正),故须传真实存在的名字;_ 去前缀转正 +
+        # 翻指针仍由 C# 做,这里只 isdir 探测、不写盘。
+        dz_root = os.path.join(project_path, "schemes", design_zone_id)
+        if os.path.isdir(os.path.join(dz_root, f"_{promoted}")):
+            variant_slug = f"_{promoted}"
+        elif os.path.isdir(os.path.join(dz_root, promoted)):
+            variant_slug = promoted
+        else:
+            return _error(f"方案目录不存在: {winner}")
+
+        # 照抄 get_zone_boundaries 的 Server 调用范式(MCP 调 Server,Server 为唯一写盘真理源)。
+        try:
+            async with ctx.session.post(
+                f"{ctx.server_url}/api/scheme/variant/adopt",
+                json={"designZoneId": design_zone_id, "variantSlug": variant_slug},
+            ) as resp:
+                if resp.status != 200:
+                    try:
+                        error_data = await resp.json()
+                        error_msg = (
+                            error_data.get("error")
+                            or error_data.get("message")
+                            or f"HTTP {resp.status}"
+                        )
+                    except Exception:
+                        error_msg = await resp.text()
+                    return _error(f"采纳失败: {error_msg}")
+                data = await resp.json()
+                return _text(json.dumps(data, ensure_ascii=False, indent=2))
         except aiohttp.ClientError as e:
             return _error(f"无法连接 Server: {e}")

@@ -4,8 +4,15 @@
 （E001–E014）+ facing normalize 从主仓 C#（BIMCanvas.Core / BIMCanvas.Server）下沉到本脚本。
 平台只提供几何原语（bimcanvas_plugin_sdk.geometry，shapely）、调用机制、稳定端点与回写。
 
+P3 · §2.8 整合（2026-06-03）：拓扑解析**只留 C# 一份**（ModuleFileTopologyService）。
+本验证器**删掉整个自建拓扑层**，降级为纯几何/语义检查器，改为消费 C# 经 stdin 注入的"已解析视图"：
+  - request["resolvedLeaves"]  = [{leafZoneId, modulesPath(相对schemes,posix), designZoneId, isContainer}]
+      → 告诉本脚本"哪个文件 = 哪个叶子 zoneId"，不再自建拓扑 / 不再 flatten / 不再读 DESIGN.md。
+  - request["zoneGeometry"]     = {designZones:[...], exclusionZones:[...]}（仅 validate 注入，几何唯一来源）。
+  - request["pathIssues"]       = [{code, zoneId, actualPath, expectedPath, moduleCount}]（E013/E014，C# 已判好）。
+
 入口：`run(request) -> result`
-  request = {mode: "normalize"|"validate", projectPath, zoneIds?: [..], variantId?: str}
+  request = {mode, projectPath, zoneIds?, variantId?, resolvedLeaves, zoneGeometry?, pathIssues}
   result  = {report: {...冻结报文...}, writeback: [{path, wrapper}, ...]}
   - normalize → report 为 ModuleNormalizationReport 形态
   - validate  → report 为 SchemeValidationReport 形态（内部先 normalize 回写、再校验）
@@ -21,8 +28,9 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from bimcanvas_plugin_sdk import geometry
 
@@ -35,7 +43,7 @@ ERROR_THRESHOLD_MM = 10.0      # SchemeValidator.ErrorThresholdMm（穿透深度
 BOUNDS_TOL_MM = 0.001          # ValidationController.BoundsCoordinateToleranceMm
 WITHIN_TOLERANCE_MM = 10.0     # CollisionDetector.IsWithinTolerant 默认容差
 
-# DiagnosticCodes
+# DiagnosticCodes（与 C# BIMCanvas.Core.Validation.DiagnosticCodes 逐字一致）
 E_OUT_OF_BOUNDS = "E001_OUT_OF_BOUNDS"
 E_WALL_OVERLAP = "E002_WALL_OVERLAP"
 E_COLUMN_OVERLAP = "E003_COLUMN_OVERLAP"
@@ -49,9 +57,13 @@ E_INVALID_MODULE_ID = "E011_INVALID_MODULE_ID"
 E_INVALID_BOUNDS = "E012_INVALID_BOUNDS"
 E_INVALID_MODULE_FILE_PATH = "E013_INVALID_MODULE_FILE_PATH"
 E_DUPLICATE_ZONE_MODULE_FILES = "E014_DUPLICATE_ZONE_MODULE_FILES"
+E_REGION_UNREACHABLE = "E015_REGION_UNREACHABLE"  # 连通性硬闸：门/子区被家具封死=不可达
 
-# ZoneType 兼容：on-disk 数据用 camelCase 字符串("room"/"designable"/"exclusion")；
-# C# Newtonsoft 读 enum 时字符串/整数都能 parse，Python 直读文件须显式兼容两种表示。
+REACH_MIN_PASSAGE_MM = 600.0       # 可达底线（次通道/到子区·次门）；主通道 900 属 Layer2 软、不入硬闸
+REACH_AREA_FLOOR_MM2 = 100000.0    # 连通块显著性地板（0.1m²），滤 buffer 碎片/噪声
+
+# ZoneType 兼容：注入数据走整数（C# 业务 enum 整数序列化）；旧 on-disk 数据可能用 camelCase 字符串。
+# 两种表示都兼容，避免 zoneGeometry / 历史文件混用时静默漏判。
 _ZONE_TYPE_ALIASES = {
     "exclusion": ZONE_EXCLUSION,
     "room": ZONE_ROOM,
@@ -86,25 +98,22 @@ def run(request: dict) -> dict:
     target_raw = set(zone_ids) if zone_ids else None
 
     if mode == "normalize":
-        return _run_normalize(project_path, target_raw, variant_id)
+        return _run_normalize(request, project_path)
     if mode == "validate":
-        return _run_validate(project_path, target_raw, variant_id)
+        return _run_validate(request, project_path, target_raw)
     raise ValueError(f"未知 mode: {mode}")
 
 
 # ── normalize（镜像 ModuleNormalizationService.NormalizeModules）──
-def _run_normalize(project_path: str, target_raw: Optional[set], variant_id: Optional[str]) -> dict:
+def _run_normalize(request: dict, project_path: str) -> dict:
     t0 = time.perf_counter()
-    schemes_path = os.path.join(project_path, "schemes")
-    topo = _build_topology(schemes_path)
-    files = _canonical_files(topo, schemes_path, target_raw, variant_id)
-
     diagnostics: list[dict] = []
     normalized_count = 0
     total_modules = 0
     writeback: list[dict] = []
 
-    for abs_path, zone_id in files:
+    # resolvedLeaves 已由 C# 按 zoneIds/variantId 解析好（含变体）；本脚本只读、归一、回写。
+    for abs_path, zone_id in _iter_resolved_files(project_path, request.get("resolvedLeaves")):
         wrapper = _read_modules_wrapper(abs_path)  # 仅认 wrapper，裸数组抛错
         if wrapper is None:
             continue
@@ -129,22 +138,22 @@ def _run_normalize(project_path: str, target_raw: Optional[set], variant_id: Opt
 
 
 # ── validate（镜像 ValidationController.ValidateLayout 全链路）────
-def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Optional[str]) -> dict:
+def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -> dict:
     t0 = time.perf_counter()
-    schemes_path = os.path.join(project_path, "schemes")
-    topo = _build_topology(schemes_path)
 
+    # 几何唯一来源 = C# 注入的 zoneGeometry（叉口-1）；建筑/库仍本地读（与拓扑无关）。
+    zg = request.get("zoneGeometry") or {}
+    design_zones = zg.get("designZones") or []
+    exclusion_zones = zg.get("exclusionZones") or []
     walls, columns = _load_architecture(project_path)
-    design_zones, exclusion_zones = _load_zone_data(project_path, schemes_path)
     library_ids = _load_library_ids(project_path)
 
     all_diags: list[dict] = []
 
     # 1) 先 normalize（写回 + 收集 E007/E008/E009），并保留各文件 modules 供后续校验
-    files = _canonical_files(topo, schemes_path, target_raw, variant_id)
     writeback: list[dict] = []
     loaded: list[tuple[str, list[dict]]] = []  # (zoneId, modules)
-    for abs_path, zone_id in files:
+    for abs_path, zone_id in _iter_resolved_files(project_path, request.get("resolvedLeaves")):
         wrapper = _read_modules_wrapper(abs_path)
         if wrapper is None:
             continue
@@ -157,8 +166,8 @@ def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Opti
         loaded.append((zone_id, modules))
         writeback.append(_writeback_entry(project_path, abs_path, wrapper))
 
-    # 2) 结构层：路径问题（E013/E014）+ bounds 结构预检（E006/E012，剔除非法 bounds 模块）
-    all_diags.extend(_path_issues(topo, schemes_path, target_raw))
+    # 2) 结构层：路径问题（E013/E014）直接并入 C# 传来的 pathIssues + bounds 结构预检（E006/E012）
+    all_diags.extend(_path_issue_diags(request.get("pathIssues")))
 
     valid_modules: list[dict] = []
     skipped = 0
@@ -182,6 +191,8 @@ def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Opti
     # 5) 几何校验（E001–E005）
     all_diags.extend(_validate_scheme(valid_modules, design_zones, exclusion_zones,
                                       walls, columns, target_raw))
+    # 6) 连通性硬闸（E015）：家具不得封死门 / 子区可达，各区 ≥600mm 可达（填 validate 拓扑盲区）
+    all_diags.extend(_validate_reachability(valid_modules, design_zones, exclusion_zones, target_raw))
 
     total_modules = len(valid_modules) + skipped
     elapsed = int((time.perf_counter() - t0) * 1000)
@@ -194,6 +205,54 @@ def _run_validate(project_path: str, target_raw: Optional[set], variant_id: Opti
         "elapsedMs": elapsed,
     }
     return {"report": report, "writeback": writeback}
+
+
+# ── 注入数据消费（P3 §2.8：取代自建拓扑层）─────────────────────
+def _iter_resolved_files(project_path: str, resolved_leaves):
+    """从 C# 注入的 resolvedLeaves 取 (abs_path, leafZoneId)。
+
+    modulesPath 相对 schemes、posix（/ 分隔）；文件不存在则跳过（叶子无 modules.json 不算错）。
+    resolvedLeaves 已在 C# 按 zoneIds/variantId 过滤，本脚本不再自行选文件。
+    """
+    schemes_path = os.path.join(project_path, "schemes")
+    for rl in resolved_leaves or []:
+        rel = rl.get("modulesPath")
+        zone_id = rl.get("leafZoneId")
+        if not rel or not zone_id:
+            continue
+        abs_path = os.path.join(schemes_path, *[s for s in rel.split("/") if s])
+        if not os.path.exists(abs_path):
+            continue
+        yield abs_path, zone_id
+
+
+def _path_issue_diags(path_issues) -> list[dict]:
+    """E013/E014：C# 已解析好的结构化 pathIssues → 诊断。
+
+    code 为全码（"E013_*"/"E014_*"，与本脚本常量逐字一致），直接透传；
+    中文 message 在此本地生成（镜像旧 _path_issues 模板，消费 actualPath/expectedPath/moduleCount）。
+    """
+    out: list[dict] = []
+    for pi in path_issues or []:
+        code = pi.get("code")
+        zone_id = pi.get("zoneId")
+        actual = pi.get("actualPath")
+        expected = pi.get("expectedPath")
+        mc = pi.get("moduleCount")
+        count_text = f"{mc} 个模块" if isinstance(mc, int) else "模块数未知"
+        if code == E_INVALID_MODULE_FILE_PATH:
+            out.append(_diag(
+                E_INVALID_MODULE_FILE_PATH, "error",
+                f"模块文件路径错误：{actual} 不应作为分区 {zone_id} 的 modules.json；"
+                f"期望路径：{expected}；文件内 {count_text}。该文件中的模块已跳过布局验证",
+                zone_id, None, actual, "moduleFile"))
+        elif code == E_DUPLICATE_ZONE_MODULE_FILES:
+            out.append(_diag(
+                E_DUPLICATE_ZONE_MODULE_FILES, "error",
+                f"分区 {zone_id} 存在多个 modules.json：{actual}；"
+                f"规范路径：{expected}；请保留规范路径并人工合并/删除错误路径",
+                zone_id, None, actual, "moduleFile"))
+    return out
 
 
 # ── facing 规范化（镜像 ModuleNormalizationService.NormalizeFacings）─
@@ -360,6 +419,178 @@ def _overlap_diag(diags: list[dict], m: dict, mb, obstacle, code: str,
                        info["area_mm2"], info["depth_mm"], info["direction"]))
 
 
+# ── E015 连通性硬闸（北极星：填 validate 拓扑盲区，禁"床封死主卫"类灾难）──
+def _validate_reachability(modules: list[dict], design_zones: list[dict],
+                           exclusion_zones: list[dict], target_raw: Optional[set]) -> list[dict]:
+    """家具不得把设计区可走空地切成不可达孤岛，且各区 ≥600mm 可达。
+
+    纯 shapely 矢量（Path 1·域内）：
+      free = 设计区多边形 − union(家具 footprint) − union(禁区)。
+      ① 鲁棒底·全封死：free 显著连通块数 > 设计区原连通块数 → 有被封死孤岛（门/子区开口被盖死）→ E015。
+      ② ≥600mm 精度：free 连通但 buffer(-300) 后显著块数变多 → 仅靠 <600mm 窄口相连 → E015。
+    shapely 不可用 / 几何异常 → 静默跳过（不阻断 validate；其余 E001–E014 仍承担）。
+    """
+    try:
+        from shapely.geometry import Polygon
+        from shapely.ops import unary_union
+    except Exception as exc:  # noqa: BLE001 —— 连通性是增量硬闸，依赖缺失不得阻断既有校验
+        print(f"[interior-layout] E015 跳过：shapely 不可用 ({exc})", file=sys.stderr, flush=True)
+        return []
+
+    def _poly(bounds):
+        try:
+            shell, holes = geometry._coerce_rings(bounds)
+            if not shell or len(shell) < 3:
+                return None
+            p = Polygon(shell, holes or None)
+            if not p.is_valid:
+                p = p.buffer(0)
+            return p if (not p.is_empty and p.area > 0) else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _pieces(geom) -> int:
+        if geom is None or geom.is_empty:
+            return 0
+        geoms = getattr(geom, "geoms", None)
+        items = list(geoms) if geoms is not None else [geom]
+        return sum(1 for g in items if (not g.is_empty) and g.area > REACH_AREA_FLOOR_MM2)
+
+    room_polys = []
+    for z in design_zones:
+        if _zone_type(z) not in (ZONE_ROOM, ZONE_DESIGNABLE):
+            continue
+        if target_raw is not None and z.get("id") not in target_raw:
+            continue
+        b = z.get("computedBoundary") or z.get("rawBoundary")
+        p = _poly(b) if b is not None else None
+        if p is not None:
+            room_polys.append(p)
+    if not room_polys:
+        return []
+    room = unary_union(room_polys)
+    room_n = _pieces(room)
+    if room_n == 0:
+        return []
+
+    # 通行障碍 = 家具 footprint。禁区(门扇开启区 ez_* 等)是「可走地面」——人就站那儿开门，
+    # 不是通行屏障，不计入。实测：把 14 个禁区当障碍 → free 被错切 3 块、NE 翼缩小、腐蚀后 <地板被滤 → 漏判全封。
+    # exclusion_zones 参数保留供签名兼容，不参与连通性。
+    module_polys = []  # (id, name, polygon) —— 供"封住孤岛的家具"精确归因
+    obstacle_polys = []
+    for m in modules:
+        p = _poly(m.get("bounds"))
+        if p is not None:
+            module_polys.append((m.get("id", ""), _name_or_none(m), p))
+            obstacle_polys.append(p)
+
+    try:
+        free = room.difference(unary_union(obstacle_polys)) if obstacle_polys else room
+    except Exception as exc:  # noqa: BLE001
+        print(f"[interior-layout] E015 跳过：free 计算失败 ({exc})", file=sys.stderr, flush=True)
+        return []
+
+    def _piece_list(geom) -> list:
+        if geom is None or geom.is_empty:
+            return []
+        geoms = getattr(geom, "geoms", None)
+        items = list(geoms) if geoms is not None else [geom]
+        sig = [g for g in items if (not g.is_empty) and g.area > REACH_AREA_FLOOR_MM2]
+        return sorted(sig, key=lambda g: g.area, reverse=True)
+
+    def _bbox_txt(g) -> str:
+        minx, miny, maxx, maxy = g.bounds
+        return f"X[{minx:.0f},{maxx:.0f}]·Y[{miny:.0f},{maxy:.0f}]（约 {g.area / 1e6:.1f}m²）"
+
+    def _sealers_of(island, reachable) -> list:
+        """卡在「孤岛」与「可达主区」之间(到两侧都近)的家具 = 封口元凶。
+        用 max(到孤岛距离, 到主区距离) 衡量"夹在中间"——床卡喉时到两侧都近、值最小；
+        岛内家具(床头柜/斗柜)到主区远、值大被排除。对腐蚀/膨胀造成的边距偏差鲁棒，
+        补识图 v4 归错(怪床头柜)的精确定位。"""
+        scored = []
+        for mid, mname, mp in module_polys:
+            try:
+                d = max(mp.distance(island), mp.distance(reachable))
+            except Exception:  # noqa: BLE001
+                continue
+            scored.append((d, mp.area, mid, mname))
+        if not scored:
+            return []
+        scored.sort(key=lambda t: (t[0], -t[1]))  # 夹得最紧优先；并列大件优先
+        thr = scored[0][0] + REACH_MIN_PASSAGE_MM  # 取与最佳同档(throat)的家具
+        return [(mid, mname) for d, _a, mid, mname in scored if d <= thr]
+
+    # 连通性判定建在「腐蚀后的 free」上 = 600mm 的人实际能站的地方。
+    # 这同时治两个坑：① 床东缘恰好贴 NE 翼开口线时，原始 difference 把两区当"0 宽桥"仍连通、漏判封喉
+    #   ——腐蚀经不起 0 宽连接、NE 翼被正确切出；② 贴墙 <600mm 细缝(没人走)在原始 free 里成假孤岛
+    #   ——腐蚀直接抹掉、不再误报。这正是"≥600mm 可达"的本义。
+    half = REACH_MIN_PASSAGE_MM / 2.0  # 300mm：600mm 通行的配置空间(腐蚀)半径
+    try:
+        reach = free.buffer(-half)
+        room_reach = room.buffer(-half)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[interior-layout] E015 跳过：腐蚀失败 ({exc})", file=sys.stderr, flush=True)
+        return []
+
+    reach_pieces = _piece_list(reach)
+    base_n = max(1, len(_piece_list(room_reach)))  # 房间本身在 600mm 通行下的连通块数(建筑基线，吸收异形颈)
+    if len(reach_pieces) <= base_n:
+        return []  # 各区 ≥600mm 互相可达，OK（贴墙细缝/0 宽贴边已被腐蚀滤掉，不误报）
+
+    # 严重度分级：再用 500mm 封死线腐蚀一遍，区分"挤都挤不过去(<500mm，真封死)"与"紧口(500–600mm)"
+    seal_half = 500.0 / 2.0  # 250mm
+    reach500 = free.buffer(-seal_half)
+    rp500 = _piece_list(reach500)
+    main500_dil = unary_union(rp500[:base_n]).buffer(seal_half) if rp500 else None
+    # "区内有没有门"探针：门扇禁区(ez_*)落在不可达区里 = 那里有门要够到
+    door_polys = [pp for pp in (
+        _poly(z.get("rawBoundary") or z.get("computedBoundary"))
+        for z in exclusion_zones if _zone_type(z) == ZONE_EXCLUSION) if pp is not None]
+
+    # 最大的 base_n 块视为可达主区，其余为不可达区
+    reachable = unary_union(reach_pieces[:base_n])
+    reachable_dil = reachable.buffer(half)
+    diags = []
+    for isl_e in reach_pieces[base_n:]:
+        try:
+            real = isl_e.buffer(half).intersection(room)  # 腐蚀块膨胀回去 ∩ 房间 ≈ 真实不可达区(用于 bbox + 归因)
+        except Exception:  # noqa: BLE001
+            real = isl_e
+        if real.is_empty:
+            real = isl_e
+
+        # 封死(口<500mm) vs 紧口(500–600mm)：500mm 通行下该区还能不能大体连回主区
+        reach_at_500 = main500_dil is not None and real.intersection(main500_dil).area > real.area * 0.5
+        sealed = not reach_at_500
+        # 区内有没有"要够到的东西"(门 / 家具)，决定是真功能失效还是仅空间浪费
+        has_door = any(real.intersects(dp) for dp in door_polys)
+        has_furn = any(real.intersects(mp) for _, _, mp in module_polys)
+        important = has_door or has_furn
+
+        sealers = _sealers_of(real, reachable_dil)
+        txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers) if sealers else "（坐标复算贴该区边界的家具）"
+        pid, pnm = sealers[0] if sealers else ("", None)
+        need = "、".join(t for t, f in (("门", has_door), ("家具", has_furn)) if f)
+
+        if sealed and important:  # 真功能失效：够不到的门/家具 → error
+            severity = "error"
+            head = f"不可达区 {_bbox_txt(real)}：口宽 <500mm，从主空间走不进去，而区内有{need}要够到（功能失效）"
+            fix = "把卡喉家具挪开 / 缩窄 / 换墙，给该区留 ≥600mm 通行口"
+        elif sealed:  # 空角被围、无门无家具 → 仅浪费，warning
+            severity = "warning"
+            head = f"封闭空角 {_bbox_txt(real)}：被家具围成走不进去的空地（口宽 <500mm），无门无家具——属空间浪费、非功能失效"
+            fix = "无需进入可忽略；想利用则留 ≥600mm 口"
+        else:  # 紧口 500–600mm → warning
+            severity = "warning"
+            head = (f"紧口区 {_bbox_txt(real)}：只能从 500–600mm 的紧口勉强进出"
+                    + (f"（区内有{need}）" if important else "") + "，低于 ≥600mm 次通道底线")
+            fix = "放宽该处通行口到 ≥600mm"
+
+        diags.append(_diag(E_REGION_UNREACHABLE, severity,
+                           f"{head}——卡喉家具：{txt}。{fix}。", pid, pnm))
+    return diags
+
+
 # ── bounds 结构预检（镜像 GetBoundsStructureError）──────────────
 def _bounds_structure_error(m: dict) -> Optional[tuple]:
     bounds = m.get("bounds")
@@ -435,36 +666,12 @@ def _reverse_dir(d: Optional[str]) -> Optional[str]:
     return {"north": "south", "south": "north", "east": "west", "west": "east"}.get(d, d)
 
 
-# ── 区域 / 建筑 / 库 读取（镜像 ValidationController.Load*）──────
+# ── 建筑 / 库 读取（镜像 ValidationController.Load*）────────────
 def _load_architecture(project_path: str) -> tuple[list[dict], list[dict]]:
     arch = _read_json(os.path.join(project_path, "baseline", "architecture.json"))
     if not isinstance(arch, dict):
         return [], []
     return arch.get("walls") or [], arch.get("columns") or []
-
-
-def _load_zone_data(project_path: str, schemes_path: str) -> tuple[list[dict], list[dict]]:
-    design: list[dict] = []
-    room_zones = _read_json(os.path.join(project_path, "computed", "room_zones.json"))
-    if isinstance(room_zones, list):
-        design.extend(room_zones)
-    scheme_zones = _read_json(os.path.join(schemes_path, "zones.json"))
-    if isinstance(scheme_zones, list):
-        design.extend(_flatten_leaves(scheme_zones))
-    exclusions = _read_json(os.path.join(project_path, "computed", "exclusions.json"))
-    excl = exclusions if isinstance(exclusions, list) else []
-    return design, excl
-
-
-def _flatten_leaves(zones: list[dict]) -> list[dict]:
-    out: list[dict] = []
-    for z in zones:
-        subs = z.get("subZones")
-        if subs:
-            out.extend(_flatten_leaves(subs))
-        else:
-            out.append(z)
-    return out
 
 
 def _load_library_ids(project_path: str) -> Optional[set]:
@@ -515,226 +722,6 @@ def _writeback_entry(project_path: str, abs_path: str, wrapper: dict) -> dict:
             "modules": out_modules,
         },
     }
-
-
-# ── 拓扑（镜像 ModuleFileTopologyService）───────────────────────
-def _build_topology(schemes_path: str) -> dict:
-    """返回 {canonical: {leafZoneId: [segments]}, leaves_by_container: {cid:[..]},
-    containers: set, design_zone_ids: set, has_topology: bool}。"""
-    empty = {"canonical": {}, "leaves_by_container": {}, "containers": set(),
-             "design_zone_ids": set(), "has_topology": False}
-    zones = _read_json(os.path.join(schemes_path, "zones.json"))
-    if not isinstance(zones, list) or len(zones) == 0:
-        return empty
-
-    by_id = {}
-    for z in zones:
-        zid = z.get("id")
-        if zid and zid not in by_id:
-            by_id[zid] = z
-
-    referenced: set = set()
-
-    def collect_ref(zs: list[dict]) -> None:
-        for z in zs:
-            for sub in (z.get("subZones") or []):
-                if sub.get("id"):
-                    referenced.add(sub["id"])
-                if sub.get("subZones"):
-                    collect_ref([sub])
-    collect_ref(zones)
-
-    canonical: dict[str, list] = {}
-    leaves_by_container: dict[str, list] = {}
-    containers: set = set()
-    design_zone_ids: set = set()
-
-    def register(zone_ref: dict, segments: list, stack: set) -> list:
-        zid = zone_ref.get("id")
-        if not zid:
-            return []
-        full = by_id.get(zid, zone_ref)
-        if zid in stack:
-            return []
-        stack.add(zid)
-        try:
-            subs = zone_ref.get("subZones") or full.get("subZones") or []
-            if subs:
-                containers.add(zid)
-                leaf_ids: list = []
-                for sub in subs:
-                    if not sub.get("id"):
-                        continue
-                    leaf_ids.extend(register(sub, segments + [sub["id"]], stack))
-                leaves_by_container[zid] = leaf_ids
-                return leaf_ids
-            if zid not in canonical:
-                canonical[zid] = list(segments)
-            return [zid]
-        finally:
-            stack.discard(zid)
-
-    for z in zones:
-        zid = z.get("id")
-        if not zid or zid in referenced:
-            continue
-        design_zone_ids.add(zid)
-        register(z, [zid], set())
-
-    canonical["_unzoned"] = ["_unzoned"]
-    return {
-        "canonical": canonical,
-        "leaves_by_container": leaves_by_container,
-        "containers": containers,
-        "design_zone_ids": design_zone_ids,
-        "has_topology": True,
-    }
-
-
-def _expand_targets(topo: dict, target_raw: Optional[set]) -> Optional[set]:
-    if not target_raw:
-        return None
-    result = set(target_raw)
-    for zid in target_raw:
-        for leaf in topo["leaves_by_container"].get(zid, []):
-            result.add(leaf)
-    return result
-
-
-def _canonical_path(schemes_path: str, segments: list) -> str:
-    return os.path.join(schemes_path, *segments, "modules.json")
-
-
-def _canonical_files(topo: dict, schemes_path: str, target_raw: Optional[set],
-                     variant_id: Optional[str]) -> list[tuple[str, str]]:
-    if not topo["has_topology"]:
-        return _legacy_files(schemes_path)
-    target = _expand_targets(topo, target_raw)
-    entries = []
-    for zid, segments in topo["canonical"].items():
-        if target is not None and zid not in target:
-            continue
-        entries.append((zid, segments))
-    out: list[tuple[str, str]] = []
-    seen = set()
-    for zid, segments in entries:
-        if variant_id:
-            path = _swap_to_variant(schemes_path, zid, segments, variant_id)
-        else:
-            path = _canonical_path(schemes_path, segments)
-        if os.path.exists(path):
-            key = os.path.normcase(os.path.abspath(path))
-            if key not in seen:
-                seen.add(key)
-                out.append((path, zid))
-    return out
-
-
-def _swap_to_variant(schemes_path: str, zone_id: str, segments: list, variant_id: str) -> str:
-    """镜像 ModuleFileTopology.SwapToVariant（新协议优先，旧 sibling 兜底）。"""
-    design_zone_id = segments[0] if segments else zone_id
-    is_top_level_leaf = (design_zone_id == zone_id)
-    if is_top_level_leaf:
-        new_path = os.path.join(schemes_path, design_zone_id, "variants", variant_id, "modules.json")
-    else:
-        new_path = os.path.join(schemes_path, design_zone_id, "variants", variant_id, zone_id, "modules.json")
-    if os.path.exists(new_path):
-        return new_path
-    # legacy sibling：schemes/{segments}/modules-{variantId}.json
-    canonical_dir = os.path.dirname(_canonical_path(schemes_path, segments))
-    return os.path.join(canonical_dir, f"modules-{variant_id}.json")
-
-
-def _legacy_files(schemes_path: str) -> list[tuple[str, str]]:
-    """无 zones.json 拓扑时的回退（镜像 FindLegacyModuleFiles）。"""
-    out: list[tuple[str, str]] = []
-    if not os.path.isdir(schemes_path):
-        return out
-    for root, _dirs, names in os.walk(schemes_path):
-        if "modules.json" not in names:
-            continue
-        dirname = os.path.basename(root)
-        low = dirname.lower()
-        if low.startswith("rz_") or low.startswith("dz_") or low == "_unzoned":
-            out.append((os.path.join(root, "modules.json"), dirname))
-    if out:
-        return out
-    legacy = os.path.join(schemes_path, "modules.json")
-    if os.path.exists(legacy):
-        out.append((legacy, "legacy"))
-    return out
-
-
-# ── 路径问题 E013/E014（镜像 ModuleFileTopology.GetPathIssues）──
-def _path_issues(topo: dict, schemes_path: str, target_raw: Optional[set]) -> list[dict]:
-    if not topo["has_topology"] or not os.path.isdir(schemes_path):
-        return []
-    target = _expand_targets(topo, target_raw)
-    canonical = topo["canonical"]
-    canonical_abs = {zid: os.path.normcase(os.path.abspath(_canonical_path(schemes_path, seg)))
-                     for zid, seg in canonical.items()}
-
-    records: list[tuple[str, str, str]] = []  # (zoneId, absPath, relPath)
-    for root, _dirs, names in os.walk(schemes_path):
-        if "modules.json" not in names:
-            continue
-        abs_path = os.path.join(root, "modules.json")
-        if "/variants/" in abs_path.replace("\\", "/").lower():
-            continue
-        rel = os.path.relpath(abs_path, schemes_path).replace("\\", "/")
-        zone_id = "legacy" if rel == "modules.json" else os.path.basename(os.path.dirname(abs_path))
-        if target is not None and zone_id not in target:
-            continue
-        records.append((zone_id, abs_path, rel))
-
-    issues: list[dict] = []
-    for zone_id, abs_path, rel in records:
-        canon = canonical_abs.get(zone_id)
-        if canon is not None and os.path.normcase(os.path.abspath(abs_path)) == canon:
-            continue  # canonical，合法
-        issues.append(_diag(E_INVALID_MODULE_FILE_PATH, "error",
-                            f"模块文件路径错误：{rel} 不应作为分区 {zone_id} 的 modules.json；"
-                            f"期望路径：{_expected_path(topo, schemes_path, zone_id)}；"
-                            f"文件内 {_count_modules_text(abs_path)}。该文件中的模块已跳过布局验证",
-                            zone_id, None, rel, "moduleFile"))
-
-    # 同一 zoneId 多文件 → E014
-    by_zone: dict[str, list[str]] = {}
-    for zone_id, _abs, rel in records:
-        by_zone.setdefault(zone_id, []).append(rel)
-    for zone_id, rels in by_zone.items():
-        if len(rels) <= 1:
-            continue
-        issues.append(_diag(E_DUPLICATE_ZONE_MODULE_FILES, "error",
-                            f"分区 {zone_id} 存在多个 modules.json：{', '.join(rels)}；"
-                            f"规范路径：{_expected_path(topo, schemes_path, zone_id)}；"
-                            f"请保留规范路径并人工合并/删除错误路径",
-                            zone_id, None, ", ".join(rels), "moduleFile"))
-    return issues
-
-
-def _expected_path(topo: dict, schemes_path: str, zone_id: str) -> str:
-    canonical = topo["canonical"]
-    if zone_id in canonical:
-        return os.path.relpath(_canonical_path(schemes_path, canonical[zone_id]), schemes_path).replace("\\", "/")
-    if zone_id in topo["containers"]:
-        leaves = [os.path.relpath(_canonical_path(schemes_path, canonical[lid]), schemes_path).replace("\\", "/")
-                  for lid in topo["leaves_by_container"].get(zone_id, []) if lid in canonical]
-        if leaves:
-            return "容器分区不承载 modules.json；请写入叶子分区：" + ", ".join(leaves)
-        return "容器分区不承载 modules.json"
-    return "zones.json 中未定义此叶子分区"
-
-
-def _count_modules_text(abs_path: str) -> str:
-    try:
-        with open(abs_path, "r", encoding="utf-8-sig") as f:
-            token = json.load(f)
-        if isinstance(token, dict) and isinstance(token.get("modules"), list):
-            return f"{len(token['modules'])} 个模块"
-    except Exception:  # noqa: BLE001
-        pass
-    return "模块数未知"
 
 
 # ── 通用工具 ────────────────────────────────────────────────────
