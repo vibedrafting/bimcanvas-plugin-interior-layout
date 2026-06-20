@@ -537,7 +537,17 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     if len(reach_pieces) <= base_n:
         return []  # 各区 ≥600mm 互相可达，OK（贴墙细缝/0 宽贴边已被腐蚀滤掉，不误报）
 
-    # 有 ≥600mm 走不到的区：最大的 base_n 块视为可达主区，其余为不可达区
+    # 严重度分级：再用 500mm 封死线腐蚀一遍，区分"挤都挤不过去(<500mm，真封死)"与"紧口(500–600mm)"
+    seal_half = 500.0 / 2.0  # 250mm
+    reach500 = free.buffer(-seal_half)
+    rp500 = _piece_list(reach500)
+    main500_dil = unary_union(rp500[:base_n]).buffer(seal_half) if rp500 else None
+    # "区内有没有门"探针：门扇禁区(ez_*)落在不可达区里 = 那里有门要够到
+    door_polys = [pp for pp in (
+        _poly(z.get("rawBoundary") or z.get("computedBoundary"))
+        for z in exclusion_zones if _zone_type(z) == ZONE_EXCLUSION) if pp is not None]
+
+    # 最大的 base_n 块视为可达主区，其余为不可达区
     reachable = unary_union(reach_pieces[:base_n])
     reachable_dil = reachable.buffer(half)
     diags = []
@@ -548,20 +558,36 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
             real = isl_e
         if real.is_empty:
             real = isl_e
+
+        # 封死(口<500mm) vs 紧口(500–600mm)：500mm 通行下该区还能不能大体连回主区
+        reach_at_500 = main500_dil is not None and real.intersection(main500_dil).area > real.area * 0.5
+        sealed = not reach_at_500
+        # 区内有没有"要够到的东西"(门 / 家具)，决定是真功能失效还是仅空间浪费
+        has_door = any(real.intersects(dp) for dp in door_polys)
+        has_furn = any(real.intersects(mp) for _, _, mp in module_polys)
+        important = has_door or has_furn
+
         sealers = _sealers_of(real, reachable_dil)
-        if sealers:
-            txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers)
-            pid, pnm = sealers[0]
-            fix = "把它挪开 / 缩窄 / 换墙，给该区留一条 ≥600mm 的通行口"
-        else:
-            txt = "（坐标复算贴该区边界的家具）"
-            pid, pnm = "", None
-            fix = "坐标复算谁压住了它的开口线"
-        diags.append(_diag(
-            E_REGION_UNREACHABLE, "error",
-            f"不可达区 {_bbox_txt(real)}：从主空间没有 ≥{int(REACH_MIN_PASSAGE_MM)}mm 宽的连续通路能走到这里"
-            f"——卡喉封口的家具：{txt}。{fix}。",
-            pid, pnm))
+        txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers) if sealers else "（坐标复算贴该区边界的家具）"
+        pid, pnm = sealers[0] if sealers else ("", None)
+        need = "、".join(t for t, f in (("门", has_door), ("家具", has_furn)) if f)
+
+        if sealed and important:  # 真功能失效：够不到的门/家具 → error
+            severity = "error"
+            head = f"不可达区 {_bbox_txt(real)}：口宽 <500mm，从主空间走不进去，而区内有{need}要够到（功能失效）"
+            fix = "把卡喉家具挪开 / 缩窄 / 换墙，给该区留 ≥600mm 通行口"
+        elif sealed:  # 空角被围、无门无家具 → 仅浪费，warning
+            severity = "warning"
+            head = f"封闭空角 {_bbox_txt(real)}：被家具围成走不进去的空地（口宽 <500mm），无门无家具——属空间浪费、非功能失效"
+            fix = "无需进入可忽略；想利用则留 ≥600mm 口"
+        else:  # 紧口 500–600mm → warning
+            severity = "warning"
+            head = (f"紧口区 {_bbox_txt(real)}：只能从 500–600mm 的紧口勉强进出"
+                    + (f"（区内有{need}）" if important else "") + "，低于 ≥600mm 次通道底线")
+            fix = "放宽该处通行口到 ≥600mm"
+
+        diags.append(_diag(E_REGION_UNREACHABLE, severity,
+                           f"{head}——卡喉家具：{txt}。{fix}。", pid, pnm))
     return diags
 
 
