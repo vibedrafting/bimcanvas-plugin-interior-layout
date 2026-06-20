@@ -506,20 +506,23 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
         minx, miny, maxx, maxy = g.bounds
         return f"X[{minx:.0f},{maxx:.0f}]·Y[{miny:.0f},{maxy:.0f}]（约 {g.area / 1e6:.1f}m²）"
 
-    SEAL_TOL_MM = 50.0  # free = room − 家具，家具与空地贴边距离≈0；容差吸收数值误差
-
     def _sealers_of(island, reachable) -> list:
-        """同时贴着「孤岛」与「可达主区」两侧的家具 = 卡在喉口、封住孤岛的元凶。
-        坐标据此区分'床卡喉(贴两侧)'与'床头柜在岛内(只贴孤岛)'——补识图做不到的精确归因。"""
-        out = []
+        """卡在「孤岛」与「可达主区」之间(到两侧都近)的家具 = 封口元凶。
+        用 max(到孤岛距离, 到主区距离) 衡量"夹在中间"——床卡喉时到两侧都近、值最小；
+        岛内家具(床头柜/斗柜)到主区远、值大被排除。对腐蚀/膨胀造成的边距偏差鲁棒，
+        补识图 v4 归错(怪床头柜)的精确定位。"""
+        scored = []
         for mid, mname, mp in module_polys:
             try:
-                if mp.distance(island) <= SEAL_TOL_MM and mp.distance(reachable) <= SEAL_TOL_MM:
-                    out.append((mid, mname, mp.area))
+                d = max(mp.distance(island), mp.distance(reachable))
             except Exception:  # noqa: BLE001
                 continue
-        out.sort(key=lambda t: t[2], reverse=True)  # 大件优先（床 > 床头柜）
-        return [(mid, mname) for mid, mname, _ in out]
+            scored.append((d, mp.area, mid, mname))
+        if not scored:
+            return []
+        scored.sort(key=lambda t: (t[0], -t[1]))  # 夹得最紧优先；并列大件优先
+        thr = scored[0][0] + REACH_MIN_PASSAGE_MM  # 取与最佳同档(throat)的家具
+        return [(mid, mname) for d, _a, mid, mname in scored if d <= thr]
 
     # 连通性判定建在「腐蚀后的 free」上 = 600mm 的人实际能站的地方。
     # 这同时治两个坑：① 床东缘恰好贴 NE 翼开口线时，原始 difference 把两区当"0 宽桥"仍连通、漏判封喉
