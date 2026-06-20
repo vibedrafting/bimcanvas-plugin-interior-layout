@@ -538,6 +538,12 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
 
     reach_pieces = _piece_list(reach)
     base_n = max(1, len(_piece_list(room_reach)))  # 房间本身在 600mm 通行下的连通块数(建筑基线，吸收异形颈)
+    # 诊断日志（吐 Server 日志，排查"该报没报/不该报却报"）：揭示验证器实算的几何块数
+    print(
+        f"[interior-layout] E015诊断: zones={len(room_polys)} mods={len(module_polys)} obs={len(obstacle_polys)} "
+        f"room_pc={len(_piece_list(room))} free_pc={len(_piece_list(free))} reach_pc={len(reach_pieces)} "
+        f"base_n={base_n} -> {'FIRE' if len(reach_pieces) > base_n else 'PASS'}",
+        file=sys.stderr, flush=True)
     if len(reach_pieces) <= base_n:
         return []  # 各区 ≥600mm 互相可达，OK（贴墙细缝/0 宽贴边已被腐蚀滤掉，不误报）
 
