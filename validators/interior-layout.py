@@ -473,46 +473,90 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     if room_n == 0:
         return []
 
-    obstacles = []
+    module_polys = []  # (id, name, polygon) —— 供"封住孤岛的家具"精确归因
+    obstacle_polys = []
     for m in modules:
         p = _poly(m.get("bounds"))
         if p is not None:
-            obstacles.append(p)
+            module_polys.append((m.get("id", ""), _name_or_none(m), p))
+            obstacle_polys.append(p)
     for z in exclusion_zones:
         if _zone_type(z) != ZONE_EXCLUSION:
             continue
         b = z.get("rawBoundary") or z.get("computedBoundary")
         p = _poly(b) if b is not None else None
         if p is not None:
-            obstacles.append(p)
+            obstacle_polys.append(p)
 
     try:
-        free = room.difference(unary_union(obstacles)) if obstacles else room
+        free = room.difference(unary_union(obstacle_polys)) if obstacle_polys else room
     except Exception as exc:  # noqa: BLE001
         print(f"[interior-layout] E015 跳过：free 计算失败 ({exc})", file=sys.stderr, flush=True)
         return []
-    free_n = _pieces(free)
 
-    # ① 全封死（不用 buffer、不用门坐标；北案床封喉时 NE 翼成孤岛、必中）
-    if free_n > room_n:
-        return [_diag(
-            E_REGION_UNREACHABLE, "error",
-            f"家具把设计区可走空地切成了 {free_n} 块互不连通的区域（设计区本应连通为 {room_n} 块）"
-            "——存在被封死、走不到的孤岛（门 / 子区唯一开口被家具盖死，如主卫 / 凹角延伸翼不可达）。"
-            "请改主家具墙面 / 位置，别让它的端缘压住通往别处的开口线。",
-            "", None)]
+    def _piece_list(geom) -> list:
+        if geom is None or geom.is_empty:
+            return []
+        geoms = getattr(geom, "geoms", None)
+        items = list(geoms) if geoms is not None else [geom]
+        sig = [g for g in items if (not g.is_empty) and g.area > REACH_AREA_FLOOR_MM2]
+        return sorted(sig, key=lambda g: g.area, reverse=True)
+
+    def _bbox_txt(g) -> str:
+        minx, miny, maxx, maxy = g.bounds
+        return f"X[{minx:.0f},{maxx:.0f}]·Y[{miny:.0f},{maxy:.0f}]（约 {g.area / 1e6:.1f}m²）"
+
+    SEAL_TOL_MM = 50.0  # free = room − 家具，家具与空地贴边距离≈0；容差吸收数值误差
+
+    def _sealers_of(island, reachable) -> list:
+        """同时贴着「孤岛」与「可达主区」两侧的家具 = 卡在喉口、封住孤岛的元凶。
+        坐标据此区分'床卡喉(贴两侧)'与'床头柜在岛内(只贴孤岛)'——补识图做不到的精确归因。"""
+        out = []
+        for mid, mname, mp in module_polys:
+            try:
+                if mp.distance(island) <= SEAL_TOL_MM and mp.distance(reachable) <= SEAL_TOL_MM:
+                    out.append((mid, mname, mp.area))
+            except Exception:  # noqa: BLE001
+                continue
+        out.sort(key=lambda t: t[2], reverse=True)  # 大件优先（床 > 床头柜）
+        return [(mid, mname) for mid, mname, _ in out]
+
+    free_pieces = _piece_list(free)
+
+    # ① 全封死：家具把设计区切出多于 room_n 的孤岛（北案床封 NE 翼喉时整片成孤岛）
+    if len(free_pieces) > room_n:
+        reachable = unary_union(free_pieces[:room_n]) if room_n > 0 else free_pieces[0]
+        diags = []
+        for isl in free_pieces[room_n:]:
+            sealers = _sealers_of(isl, reachable)
+            if sealers:
+                txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers)
+                pid, pnm = sealers[0]
+                fix = "把它挪开 / 缩窄 / 换墙，给该孤岛留一条 ≥600mm 的口"
+            else:
+                txt = "（坐标复算贴该孤岛边界的家具）"
+                pid, pnm = "", None
+                fix = "坐标复算谁压住了它的开口线"
+            diags.append(_diag(
+                E_REGION_UNREACHABLE, "error",
+                f"不可达孤岛 {_bbox_txt(isl)} 被家具封死、走不到——卡喉封口的家具：{txt}。{fix}。",
+                pid, pnm))
+        return diags
 
     # ② ≥600mm 精度：free 连通但 600mm 通行下被 <600mm 窄口切分
     try:
         eroded = free.buffer(-REACH_MIN_PASSAGE_MM / 2.0)
     except Exception:  # noqa: BLE001
         eroded = None
-    if eroded is not None and _pieces(eroded) > free_n:
+    eroded_pieces = _piece_list(eroded)
+    if len(eroded_pieces) > len(free_pieces):
+        # 腐蚀后多出来的较小块 = 窄口后方区域，膨胀回去近似其真实范围
+        spots = "、".join(
+            _bbox_txt(g.buffer(REACH_MIN_PASSAGE_MM / 2.0)) for g in eroded_pieces[len(free_pieces):][:2])
         return [_diag(
             E_REGION_UNREACHABLE, "error",
-            f"设计区内存在仅靠 <{int(REACH_MIN_PASSAGE_MM)}mm 窄口相连的区域"
-            f"——按 {int(REACH_MIN_PASSAGE_MM)}mm 通行核验被切成多块，某区 / 门可达性不足"
-            f"（次通道底线 ≥{int(REACH_MIN_PASSAGE_MM)}mm；放宽该处通行口或挪开压口家具）。",
+            f"设计区有区域仅靠 <{int(REACH_MIN_PASSAGE_MM)}mm 窄口相连——按 {int(REACH_MIN_PASSAGE_MM)}mm 通行核验被切开，"
+            f"窄口后方约 {spots} 可达性不足（次通道底线 ≥{int(REACH_MIN_PASSAGE_MM)}mm；放宽该口或挪开压口家具）。",
             "", None)]
 
     return []
