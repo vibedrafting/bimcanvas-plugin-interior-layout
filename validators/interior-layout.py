@@ -521,45 +521,49 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
         out.sort(key=lambda t: t[2], reverse=True)  # 大件优先（床 > 床头柜）
         return [(mid, mname) for mid, mname, _ in out]
 
-    free_pieces = _piece_list(free)
-
-    # ① 全封死：家具把设计区切出多于 room_n 的孤岛（北案床封 NE 翼喉时整片成孤岛）
-    if len(free_pieces) > room_n:
-        reachable = unary_union(free_pieces[:room_n]) if room_n > 0 else free_pieces[0]
-        diags = []
-        for isl in free_pieces[room_n:]:
-            sealers = _sealers_of(isl, reachable)
-            if sealers:
-                txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers)
-                pid, pnm = sealers[0]
-                fix = "把它挪开 / 缩窄 / 换墙，给该孤岛留一条 ≥600mm 的口"
-            else:
-                txt = "（坐标复算贴该孤岛边界的家具）"
-                pid, pnm = "", None
-                fix = "坐标复算谁压住了它的开口线"
-            diags.append(_diag(
-                E_REGION_UNREACHABLE, "error",
-                f"不可达孤岛 {_bbox_txt(isl)} 被家具封死、走不到——卡喉封口的家具：{txt}。{fix}。",
-                pid, pnm))
-        return diags
-
-    # ② ≥600mm 精度：free 连通但 600mm 通行下被 <600mm 窄口切分
+    # 连通性判定建在「腐蚀后的 free」上 = 600mm 的人实际能站的地方。
+    # 这同时治两个坑：① 床东缘恰好贴 NE 翼开口线时，原始 difference 把两区当"0 宽桥"仍连通、漏判封喉
+    #   ——腐蚀经不起 0 宽连接、NE 翼被正确切出；② 贴墙 <600mm 细缝(没人走)在原始 free 里成假孤岛
+    #   ——腐蚀直接抹掉、不再误报。这正是"≥600mm 可达"的本义。
+    half = REACH_MIN_PASSAGE_MM / 2.0  # 300mm：600mm 通行的配置空间(腐蚀)半径
     try:
-        eroded = free.buffer(-REACH_MIN_PASSAGE_MM / 2.0)
-    except Exception:  # noqa: BLE001
-        eroded = None
-    eroded_pieces = _piece_list(eroded)
-    if len(eroded_pieces) > len(free_pieces):
-        # 腐蚀后多出来的较小块 = 窄口后方区域，膨胀回去近似其真实范围
-        spots = "、".join(
-            _bbox_txt(g.buffer(REACH_MIN_PASSAGE_MM / 2.0)) for g in eroded_pieces[len(free_pieces):][:2])
-        return [_diag(
-            E_REGION_UNREACHABLE, "error",
-            f"设计区有区域仅靠 <{int(REACH_MIN_PASSAGE_MM)}mm 窄口相连——按 {int(REACH_MIN_PASSAGE_MM)}mm 通行核验被切开，"
-            f"窄口后方约 {spots} 可达性不足（次通道底线 ≥{int(REACH_MIN_PASSAGE_MM)}mm；放宽该口或挪开压口家具）。",
-            "", None)]
+        reach = free.buffer(-half)
+        room_reach = room.buffer(-half)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[interior-layout] E015 跳过：腐蚀失败 ({exc})", file=sys.stderr, flush=True)
+        return []
 
-    return []
+    reach_pieces = _piece_list(reach)
+    base_n = max(1, len(_piece_list(room_reach)))  # 房间本身在 600mm 通行下的连通块数(建筑基线，吸收异形颈)
+    if len(reach_pieces) <= base_n:
+        return []  # 各区 ≥600mm 互相可达，OK（贴墙细缝/0 宽贴边已被腐蚀滤掉，不误报）
+
+    # 有 ≥600mm 走不到的区：最大的 base_n 块视为可达主区，其余为不可达区
+    reachable = unary_union(reach_pieces[:base_n])
+    reachable_dil = reachable.buffer(half)
+    diags = []
+    for isl_e in reach_pieces[base_n:]:
+        try:
+            real = isl_e.buffer(half).intersection(room)  # 腐蚀块膨胀回去 ∩ 房间 ≈ 真实不可达区(用于 bbox + 归因)
+        except Exception:  # noqa: BLE001
+            real = isl_e
+        if real.is_empty:
+            real = isl_e
+        sealers = _sealers_of(real, reachable_dil)
+        if sealers:
+            txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers)
+            pid, pnm = sealers[0]
+            fix = "把它挪开 / 缩窄 / 换墙，给该区留一条 ≥600mm 的通行口"
+        else:
+            txt = "（坐标复算贴该区边界的家具）"
+            pid, pnm = "", None
+            fix = "坐标复算谁压住了它的开口线"
+        diags.append(_diag(
+            E_REGION_UNREACHABLE, "error",
+            f"不可达区 {_bbox_txt(real)}：从主空间没有 ≥{int(REACH_MIN_PASSAGE_MM)}mm 宽的连续通路能走到这里"
+            f"——卡喉封口的家具：{txt}。{fix}。",
+            pid, pnm))
+    return diags
 
 
 # ── bounds 结构预检（镜像 GetBoundsStructureError）──────────────
