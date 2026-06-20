@@ -474,19 +474,15 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     if room_n == 0:
         return [_diag("E015_DEBUG", "warning", "[E015调试] room_n=0（房间多边形面积为0/无效）", "", None)]
 
+    # 通行障碍 = 家具 footprint。禁区(门扇开启区 ez_* 等)是「可走地面」——人就站那儿开门，
+    # 不是通行屏障，不计入。实测：把 14 个禁区当障碍 → free 被错切 3 块、NE 翼缩小、腐蚀后 <地板被滤 → 漏判全封。
+    # exclusion_zones 参数保留供签名兼容，不参与连通性。
     module_polys = []  # (id, name, polygon) —— 供"封住孤岛的家具"精确归因
     obstacle_polys = []
     for m in modules:
         p = _poly(m.get("bounds"))
         if p is not None:
             module_polys.append((m.get("id", ""), _name_or_none(m), p))
-            obstacle_polys.append(p)
-    for z in exclusion_zones:
-        if _zone_type(z) != ZONE_EXCLUSION:
-            continue
-        b = z.get("rawBoundary") or z.get("computedBoundary")
-        p = _poly(b) if b is not None else None
-        if p is not None:
             obstacle_polys.append(p)
 
     try:
