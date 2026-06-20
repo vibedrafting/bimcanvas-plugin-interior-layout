@@ -434,8 +434,7 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
         from shapely.geometry import Polygon
         from shapely.ops import unary_union
     except Exception as exc:  # noqa: BLE001 —— 连通性是增量硬闸，依赖缺失不得阻断既有校验
-        print(f"[interior-layout] E015 跳过：shapely 不可用 ({exc})", file=sys.stderr, flush=True)
-        return []
+        return [_diag("E015_DEBUG", "warning", f"[E015调试] shapely 不可用：{exc}", "", None)]
 
     def _poly(bounds):
         try:
@@ -467,11 +466,13 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
         if p is not None:
             room_polys.append(p)
     if not room_polys:
-        return []
+        return [_diag("E015_DEBUG", "warning",
+                      f"[E015调试] 没建出设计区多边形：design_zones={len(design_zones)} target={target_raw}"
+                      "（边界格式 _coerce_rings 没吃下 → 连通性检查空转、永远 PASS，根因在此）", "", None)]
     room = unary_union(room_polys)
     room_n = _pieces(room)
     if room_n == 0:
-        return []
+        return [_diag("E015_DEBUG", "warning", "[E015调试] room_n=0（房间多边形面积为0/无效）", "", None)]
 
     module_polys = []  # (id, name, polygon) —— 供"封住孤岛的家具"精确归因
     obstacle_polys = []
@@ -491,8 +492,7 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     try:
         free = room.difference(unary_union(obstacle_polys)) if obstacle_polys else room
     except Exception as exc:  # noqa: BLE001
-        print(f"[interior-layout] E015 跳过：free 计算失败 ({exc})", file=sys.stderr, flush=True)
-        return []
+        return [_diag("E015_DEBUG", "warning", f"[E015调试] free=room−障碍 计算失败：{exc}", "", None)]
 
     def _piece_list(geom) -> list:
         if geom is None or geom.is_empty:
@@ -533,19 +533,17 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
         reach = free.buffer(-half)
         room_reach = room.buffer(-half)
     except Exception as exc:  # noqa: BLE001
-        print(f"[interior-layout] E015 跳过：腐蚀失败 ({exc})", file=sys.stderr, flush=True)
-        return []
+        return [_diag("E015_DEBUG", "warning", f"[E015调试] buffer 腐蚀失败：{exc}", "", None)]
 
     reach_pieces = _piece_list(reach)
     base_n = max(1, len(_piece_list(room_reach)))  # 房间本身在 600mm 通行下的连通块数(建筑基线，吸收异形颈)
-    # 诊断日志（吐 Server 日志，排查"该报没报/不该报却报"）：揭示验证器实算的几何块数
-    print(
-        f"[interior-layout] E015诊断: zones={len(room_polys)} mods={len(module_polys)} obs={len(obstacle_polys)} "
-        f"room_pc={len(_piece_list(room))} free_pc={len(_piece_list(free))} reach_pc={len(reach_pieces)} "
-        f"base_n={base_n} -> {'FIRE' if len(reach_pieces) > base_n else 'PASS'}",
-        file=sys.stderr, flush=True)
+    # 诊断（临时·吐到 validate 结果，排查"该报没报"）：揭示验证器实算的几何块数
+    _dbg = (f"zones={len(room_polys)} mods={len(module_polys)} obs={len(obstacle_polys)} "
+            f"room_pc={len(_piece_list(room))} free_pc={len(_piece_list(free))} "
+            f"reach_pc={len(reach_pieces)} base_n={base_n}")
     if len(reach_pieces) <= base_n:
-        return []  # 各区 ≥600mm 互相可达，OK（贴墙细缝/0 宽贴边已被腐蚀滤掉，不误报）
+        return [_diag("E015_DEBUG", "warning",
+                      f"[E015调试·PASS] {_dbg}（若这是全封方案却 PASS，把本行发我）", "", None)]
 
     # 有 ≥600mm 走不到的区：最大的 base_n 块视为可达主区，其余为不可达区
     reachable = unary_union(reach_pieces[:base_n])
