@@ -211,6 +211,53 @@ def register(builder: McpServerBuilder) -> None:
             )
         )
 
+    # ---------- reveal_variant ----------
+    @builder.tool(
+        "reveal_variant",
+        "揭示候选可见:把隐藏候选 _{slug} 去前缀转正为 {slug}(rename),使其进入 Web 采纳轮播。"
+        "与 adopt_variant 的区别:**只转正可见、不翻 adopted 指针**(终选仍归用户)。"
+        "幂等:已可见则直接成功;两者皆不存在报错。落地成功收尾时由 placement 调用——"
+        "认输/失败的候选不调用 → 留 _ 隐藏、不进轮播(fail-safe)。",
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["designZoneId", "slug"],
+            "properties": {
+                "designZoneId": {"type": "string", "description": "设计区节点 path(如 rz_3)"},
+                "slug": {"type": "string", "description": "候选 slug,可带或不带 _ 前缀"},
+            },
+            "additionalProperties": False,
+        },
+    )
+    async def reveal_variant(args: dict[str, Any]) -> dict[str, Any]:
+        """把隐藏候选 _{slug} 转正为可见 {slug}(纯文件 rename,不翻 adopted 指针)。
+
+        register_variant 同为纯文件操作(无 Server 调用),Web 在流程收尾 reload 时按目录名
+        识别可见候选;本工具镜像其做法,只做 _ 前缀的 rename,故无需走 Server。
+        """
+        project_path = getattr(ctx, "project_path", None)
+        if not project_path:
+            return _error("当前无加载项目(project_path 为空),无法揭示候选")
+
+        design_zone_id = args["designZoneId"]
+        raw = args["slug"]
+        slug = raw[1:] if raw.startswith("_") else raw
+        if not biz.is_safe_slug(slug):
+            return _error(f"slug 非法 '{raw}':去前缀后须 [a-z0-9-]、长度 1..30")
+
+        dz_root = os.path.join(project_path, "schemes", design_zone_id)
+        hidden = os.path.join(dz_root, f"_{slug}")
+        visible = os.path.join(dz_root, slug)
+        if os.path.isdir(visible):
+            return _text(json.dumps(
+                {"slug": slug, "dirName": slug, "revealed": False, "note": "已可见"},
+                ensure_ascii=False))
+        if not os.path.isdir(hidden):
+            return _error(f"候选目录不存在: _{slug} / {slug}")
+        os.rename(hidden, visible)
+        return _text(json.dumps(
+            {"slug": slug, "dirName": slug, "revealed": True}, ensure_ascii=False))
+
     # ---------- adopt_variant ----------
     @builder.tool(
         "adopt_variant",
