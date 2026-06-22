@@ -23,33 +23,29 @@
 
 | | 任务 |
 |---|---|
-| **支持** | chat · query（统计/查看/列出）· edit（移动/删除/旋转）· **场景①：无参考 · 单设计区 · 多方案设计** |
-| **暂不支持** | 参考分析 · 多分区 · relocation（对应 workflow 待建；主控会如实告知，不走旧链路） |
+| **支持** | chat · query（统计/查看/列出）· edit（移动/删除/旋转）· **M1 单区设计**（场景①/②：无参考 · 单设计区 · 多方案）· **M2 多区设计**（场景③：无参考 · 多设计区 · 全屋 · 多方案） |
+| **暂不支持** | 参考分析 · 局部重绘 · 批量无人（对应 workflow 待建；主控会如实告知，不走旧链路） |
 
 - **输入**：`.bcp` 项目（baseline 户型 + 既有 schemes）+ 自然语言指令
-- **输出**：`schemes/{zoneId}/{slug}/[{leaf}/]modules.json`（布置几何）+ 同级 `DESIGN.md`（设计意图合同）
+- **输出**：`schemes/{zoneId}/{slug}/[{leaf}/]modules.json`（布置几何）+ 同级 `DESIGN.md`（设计意图合同）；M2 另写项目级 `schemes/DESIGN.md`（全屋协调）
 - **边界**：引擎只决策"放哪 / 为什么 / 怎么放"；几何 / 碰撞 / 边界由平台 `validate_layout` 委派本插件 `validators/` 校验
 
-轻任务（chat/query/edit）主控直接处理，不上 workflow——没有扇出价值的流程不值得编排开销。设计任务（场景①）才拉起五段流。
+轻任务（chat/query/edit）主控直接处理，不上 workflow——没有扇出价值的流程不值得编排开销。设计任务（M1/M2）走主控为脑：**M1 主控自跑设计 SOP + 吐 fanout 落地；M2 主控全屋核+拆区 + 吐全屋 workflow 按设计区扇出**。
 
-## 3. 设计引擎：场景① 五段流
+## 3. 设计引擎：主控为脑 + 工作模式（M1/M2）
 
-把一次设计拆成五个**认知阶段**，每段对应设计师真实工作中的一个思维断点。主控吐 `Workflow` 工具拉起 `workflows/interior-layout.workflow.js`：
+设计推理统一由 `single-zone-design` **SOP**（设计流程 Skill）定义——单设计区设计阶段的**唯一权威**：Step0 读全屋协调 → Step1 感知 → Step2 规划双思维 → Step3 多方案。主控按意图分**工作模式**，SOP 在两模式共用，**单区/多区设计行为同源一致**。
 
-```jsonc
-{ "designZoneId": "<设计区 id>", "originalUserRequest": "<用户原话>", "n": 3 }
-// n = 候选方案数，1–4，默认 3
-```
+| 模式 | 谁执行设计阶段 | 落地编排 | 形态 |
+|----|---------|---------|------|
+| **M1 单区**（场景①/②） | **主控亲自加载 SOP 自跑**（可交互，策略点可 `AskUserQuestion`） | 主控吐 `interior-layout-fanout` | 设计阶段单上下文一气呵成，不扇出；只 N 方案落地才并行 |
+| **M2 多区**（场景③） | **全屋 workflow 按设计区扇出 `zone-design-agent`**（各加载同一 SOP、静默） | 内层 `workflow()` 嵌套复用 fanout | 主控全屋核+拆区→写项目级 `schemes/DESIGN.md`→扇出各区设计→各区落地→逐区采纳 |
 
-| 段 | 认知任务 | 角色 |
-|----|---------|------|
-| **1 感知** | 听懂用户要什么（定调）+ 独立读懂这个空间（动线 / 纵深 / 采光 / 潜力与风险）——先有空间理解，才谈布置 | `perception-agent` |
-| **2 规划推演** | 用两种设计师都会用的思路并行推演：**分区思维**（先切功能带）∥ **顺序思维**（从最重要的家具依次锁墙）。双思维互补，避免单一视角的盲区 | `zoning-design` ∥ `sequential-design` |
-| **3 多方案** | 把双草稿收割成 N 个**方向**——每个方向只锁一条硬锚点（如"床靠西墙"），其余决策权完整留给落地。差异在方向层，不在配置层（为什么见 §6） | `multi-plan-agent` |
-| **4 落地** | N 路并行，每路独立完成：施工简报 → 按图施工 → 落位自检 → `validate_layout` → **识图自评**（截图问 4-6 个聚焦小问，如"床头柜与床是否贴邻"）→ 自优化。外部视觉视角与内部设计上下文在同一会话闭环 | `placement-agent` ×N + `verify-agent` 核验 |
-| **5 对比** | 纯脚本机械拼对比表（家具靠墙 / 储物延米 / 可选家具有无 + 实质雷同标注），零 LLM。**终选 = 用户在 Web 端点「采纳」**（翻父 `DESIGN.md` 的 `adopted` 指针） | `design-scribe` |
+**设计阶段（SOP，4 步）**：Step0 读项目级 `schemes/DESIGN.md` 全屋协调（M2 由主控写、各区据此对齐风格/共享边界；M1 无则 standalone）→ Step1 感知 `perception-method`（定调+空间骨架）→ Step2 规划 `zoning-thinking` ∥ `sequential-thinking`（分区思维 / 顺序思维双视角）→ Step3 多方案 `multi-variant-diversity`（收割成 N 个**方向**，每方向只锁一条硬锚点，差异在方向层不在配置层，见 §6）。各步逐步加载方法 Skill 供能、按 `design-doc-upsert` 写父 `DESIGN.md`。
 
-每段的中间产物都限长——更短的上游材料让下游 agent 的注意力集中在真正的约束上，每个传递的字段都是"上游写一次、下游读一次"的双向成本。
+**落地阶段（`interior-layout-fanout`）**：N 路并行，每路 `placement-agent` 独立完成施工→`validate_layout`→**识图自评**→自优化，跟 `verify-agent` 独立 validate 闸门（不信自报、磁盘事实算布尔）；最后纯脚本机械拼对比表（家具靠墙 / 储物延米 / 可选家具有无 + 实质雷同标注），零 LLM。**终选 = 用户在 Web 端点「采纳」**（翻父 `DESIGN.md` 的 `adopted` 指针）。
+
+> **为什么是这个形态**（设计阶段单上下文一气呵成、只落地才并行扇出、单/多区共享 SOP）：见 §6 + 主仓库 `Arch_Workflow.md`。中间产物都限长——上游每个字段都是"写一次、读一次"的双向成本。
 
 ## 4. 设计知识体系（引擎的护城河）
 
@@ -82,13 +78,15 @@
 
 | 资产 | 内容 |
 |---|---|
-| `agents/`（7） | `perception` · `zoning-design` · `sequential-design` · `multi-plan`（opus）· `placement` · `verify-agent` · `design-scribe`（除 multi-plan 外均 haiku） |
-| `workflows/` | `interior-layout.workflow.js`（五段编排主入口） |
+| `agents/`（3，均 haiku 壳） | `placement-agent`（落地分身，加载 placement-procedure）· `verify-agent`（零领域确定性核验员）· `zone-design-agent`（M2 多区静默设计分身，加载 single-zone-design SOP） |
+| `workflows/`（2） | `interior-layout-fanout.workflow.js`（落地扇出：N 方案并行 placement + verify 闸门 + 对比表）· `interior-layout-whole-house.workflow.js`（M2 多区编排：外层扇出 zone-design-agent + 内层嵌套复用 fanout） |
 | `mcp_tools/`（3，`interior-layout` 命名空间） | `get_zone_boundaries`（zone 边界段语义 wall/passage/door/window）· `register_variant`（建变体目录骨架）· `adopt_variant`（采纳收口 + 翻指针） |
-| `validators/` | `interior-layout.py`（平台 `validate_layout` 委派的几何/碰撞/边界校验脚本） |
-| `skills/` | `load-design-knowledge`（references 唯一加载入口·阶段感知；references/ 子目录随其发布） |
+| `validators/` | `interior-layout.py`（平台 `validate_layout` 委派的几何/碰撞/边界校验脚本，E001–E015） |
+| `skills/`（9） | **流程**：`single-zone-design`（设计阶段 SOP·M1/M2 共用唯一权威）· `whole-house-zoning`（M2 全屋核+拆区）· `placement-procedure`（落地施工方法）· `design-doc-upsert`（父 DESIGN.md 单写者落盘纪律）。**方法**：`perception-method` · `zoning-thinking` · `sequential-thinking` · `multi-variant-diversity`。**知识入口**：`load-design-knowledge`（references 唯一加载入口·阶段感知；references/ 子目录随其发布） |
 
 > 设计意图统一落 `DESIGN.md`（普通 `Read`/`Write`/`Edit`）；旧的 `semantic_plan` / `reference_analysis` JSON 合同及对应 4 个 MCP 工具已退役删除。落地额外依赖平台 `canvas` 命名空间工具：`load_artifact` / `validate_layout` / `canvas_vision` / `create_job` · `complete_job`。
+>
+> **编排骨架**：主控 `BIMCANVAS.md` 按工作模式路由（M1/M2/query/edit/chat）。M1 主控自跑 SOP + 吐 fanout；M2 主控全屋核 + 吐 whole-house workflow（内层用 `args.fanoutScriptPath` 嵌套调 fanout）。
 
 ## 6. 关键设计决策（提炼自实测）
 
