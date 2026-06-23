@@ -27,8 +27,7 @@
       "mcp__canvas__validate_layout",
       "mcp__interior-layout__get_zone_boundaries",
       "mcp__interior-layout__register_variant",
-      "mcp__interior-layout__reveal_variant",
-      "mcp__interior-layout__hide_variant",
+      "mcp__interior-layout__set_variant_visibility",
       "mcp__interior-layout__adopt_variant"
     ],
     "deny": []

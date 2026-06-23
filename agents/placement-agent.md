@@ -1,7 +1,7 @@
 ---
 name: placement-agent
-description: 场景①方案落地分身（壳）。被扇出 workflow 并行拉起，每实例落地一个变体方向（anchorSeed=唯一硬约束）。本 agent 是薄壳——业务方法全在 placement-procedure skill：register_variant(隐藏 _{slug}) + (按需)zones.json + 施工简报(闭合预检/扣减账本/fallback) + 按图施工 + 落位自检 + validate + 2 次定点识图自评 + 自优化(报警逐条处置 + 可选家具补全含联动置换) + 成功(ok:true)才 reveal_variant 转正可见。认输/失败留隐藏不进轮播。终选由用户在 Web 端执行。
-tools: Read, Write, Edit, Skill, mcp__interior-layout__register_variant, mcp__interior-layout__reveal_variant, mcp__interior-layout__get_zone_boundaries, mcp__canvas__validate_layout, mcp__canvas__canvas_vision
+description: 场景①方案落地分身（壳）。被扇出 workflow 并行拉起，每实例落地一个变体方向（anchorSeed=唯一硬约束）。本 agent 是薄壳——业务方法全在 placement-procedure skill：register_variant(隐藏 _{slug}) + (按需)zones.json + 施工简报(闭合预检/扣减账本/fallback) + 按图施工 + 落位自检 + validate + 2 次定点识图自评 + 自优化(报警逐条处置 + 可选家具补全含联动置换) + 成功(ok:true)才 set_variant_visibility(visible:true) 转正可见。认输/失败留隐藏不进轮播。终选由用户在 Web 端执行。
+tools: Read, Write, Edit, Skill, mcp__interior-layout__register_variant, mcp__interior-layout__set_variant_visibility, mcp__interior-layout__get_zone_boundaries, mcp__canvas__validate_layout, mcp__canvas__canvas_vision
 model: haiku
 ---
 

@@ -4,10 +4,10 @@ description: |
   场景①方案落地方法（集成自评+自优化）。在变体锚点（anchorSeed=唯一硬约束）下全局重判并完整落地
   一个变体：register_variant（隐藏目录 _{slug}）+ (按需) zones.json + 施工简报（闭合预检/扣减账本/fallback）
   + 按图施工 + 落位自检 + validate + 2 次定点识图自评（设计品质5维/通用品质4项）+ 自优化（报警逐条
-  处置 + 可选家具补全含联动置换）+ **成功(ok:true)才 reveal_variant 转正可见** + 返回结构化 factsheet。
+  处置 + 可选家具补全含联动置换）+ **成功(ok:true)才 set_variant_visibility(visible:true) 转正可见** + 返回结构化 factsheet。
   认输/失败留隐藏不进轮播(fail-safe)。供 placement 壳 agent 加载执行。
   设计知识本体（放置法则/识图维度等）由 load-design-knowledge 按阶段注入（不在本 skill）。
-allowed-tools: Read, Write, Edit, Skill, mcp__interior-layout__register_variant, mcp__interior-layout__reveal_variant, mcp__interior-layout__get_zone_boundaries, mcp__canvas__validate_layout, mcp__canvas__canvas_vision
+allowed-tools: Read, Write, Edit, Skill, mcp__interior-layout__register_variant, mcp__interior-layout__set_variant_visibility, mcp__interior-layout__get_zone_boundaries, mcp__canvas__validate_layout, mcp__canvas__canvas_vision
 ---
 
 # 方案落地方法（集成自评 + 自优化）
@@ -47,7 +47,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 - 用本变体 slug（`[a-z0-9-]` ≤30，不加 `alt-` 前缀）。
 - 判断本变体方向**是否需要内部分区**（依入场知识与方案草稿的分区思维）：决定 `leafCount`（`0` 或 `1` = 不建叶子；`>1` = 建 `dz_1..n`）。
 - 调 `mcp__interior-layout__register_variant({ designZoneId, slug, visible: false, leafCount, summary: variantDirection })` 建**隐藏**目录骨架(`_{slug}`)。返回的 `leafPaths` 是各叶子 modules.json 路径。
-  - **WHY 隐藏注册(fail-safe)**:候选先隐藏,**只有 Step H 正常完成(`ok:true`)才揭示可见**(`reveal_variant`)；认输 / 崩溃 / 超时一律留隐藏、不进 Web 采纳轮播,杜绝"系统已判失败的破布局仍可被用户采纳"(M1 实测 north-sanctuary 认输后产物残留可见之坑)。
+  - **WHY 隐藏注册(fail-safe)**:候选先隐藏,**只有 Step H 正常完成(`ok:true`)才揭示可见**(`set_variant_visibility(visible:true)`)；认输 / 崩溃 / 超时一律留隐藏、不进 Web 采纳轮播,杜绝"系统已判失败的破布局仍可被用户采纳"(M1 实测 north-sanctuary 认输后产物残留可见之坑)。
   - 隐藏期间 Step E `validate_layout` / Step F `canvas_vision` 用 `variantId:"{slug}"`(不带 `_`)即可——Server 解析候选目录时会自动 toggle `_` 前缀命中隐藏目录,无需特殊处理。
 - **必须保留** register 写入的 `schemeMetadata.summary`。
 - **【必须·禁探针绕行】**若 `register_variant`（或后续任一 MCP 工具）返回错误（`isError`），**禁止**写 `test.txt` 等探针文件试探文件系统、也禁止重命名/反复重试绕行。**立即停止本变体并返回结构化错误**（哪一步哪个工具报了什么错），把失败如实交回编排层处置。register 没成功建出目录骨架，后续写盘必然落到错误位置。
@@ -242,7 +242,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 
 - **何时认输**：`variantAnchorSeed` 在当前几何下不成立，或闭合预检 fallback 也救不回 → 返回 `ok:false`，`report` 写明"本变体无法兑现 `variantAnchorSeed`：<具体原因 + 坐标证据>"，**不强行写出违反锚点的方案**，不造"0 模块 0 错误"假成功。
 - **【卖点几何失效·净负残骸】** anchorSeed 名义可放、但其**设计目的（direction/narrative 的卖点，如"遮挡床区"）几何上无法兑现**，且勉强兑现产出的元素是**净负**（不服务卖点 + 损害动线/品质）——**移除该净负元素**（Step E 修正阶梯"移除"档）；若移除后本变体退化成另一已落地方案（失去 distinctiveness），返回 `ok:false`，`report` 写明"卖点 <X> 几何无法兑现、移除残骸后退化为 <方案Y>，建议弃"。**禁止 ship 净负残骸硬凑变体数**。
-- **【必须·成功才揭示可见】正常完成(`ok:true`)前**:调 `mcp__interior-layout__reveal_variant({ designZoneId, slug })` 把本候选从隐藏 `_{slug}` 转正为可见 `{slug}`,使其进入用户采纳轮播。**仅 `ok:true` 调此工具**;下面任一认输路径(`ok:false`)**绝不调用**——候选留隐藏 `_{slug}`、不进轮播(fail-safe)。`reveal_variant` 只转正可见、不翻 `adopted` 指针(终选仍归用户)。
+- **【必须·成功才揭示可见】正常完成(`ok:true`)前**:调 `mcp__interior-layout__set_variant_visibility({ designZoneId, slug, visible: true })` 把本候选从隐藏 `_{slug}` 转正为可见 `{slug}`,使其进入用户采纳轮播。**仅 `ok:true` 调**;下面任一认输路径(`ok:false`)**绝不调用**——候选留隐藏 `_{slug}`、不进轮播(fail-safe)。本工具只改可见性、不翻 `adopted` 指针(终选仍归用户),返回最新 `dirName`/`variantRoot`。
 - **正常完成**——`factsheet` 各字段（用户终选的决策辅助，信封见上方骨架）：
   - `mainFurnitureWalls`：主家具墙面归属签名——跨方案雷同比对键，**严格 `家具:墙名|家具:墙名` 格式**（如 `床:西墙|衣柜:北墙+东墙₂|梳妆台:东墙₁`）：**禁尺寸/段位修饰（"南段""全段""右段"）/ 括号注释 / 附属家具（窗帘、床头柜不进）**——实测教训：自由文本修饰（"西墙南段" vs "西墙(全段4850mm)"）让两个相同布局的雷同比对失效，用户看到两个一模一样的方案各挂一套说辞；
   - `furnitureList`：一行家具清单（对照 zone tags / optionalTags，**缺省的可选家具也列出**，如"梳妆台:无"）；
