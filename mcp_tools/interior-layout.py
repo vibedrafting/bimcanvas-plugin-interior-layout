@@ -258,6 +258,63 @@ def register(builder: McpServerBuilder) -> None:
         return _text(json.dumps(
             {"slug": slug, "dirName": slug, "revealed": True}, ensure_ascii=False))
 
+    # ---------- hide_variant ----------
+    @builder.tool(
+        "hide_variant",
+        "隐藏可见方案:把可见候选 {slug} 加 _ 前缀改名为 _{slug}(rename),使其退出 Web 采纳轮播"
+        "(保留数据、可被 reveal_variant 复原)。reveal_variant 的**反向**操作:只隐藏、不删数据、不翻 adopted 指针。"
+        "幂等:已隐藏则直接成功;两者皆不存在报错。**禁隐藏已采纳的生效方案**(adopted 指向的 slug,隐藏会让指针悬空)。"
+        "用途:用户/主控事后剔除不想要的可见候选(无需彻底删除)。",
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "required": ["designZoneId", "slug"],
+            "properties": {
+                "designZoneId": {"type": "string", "description": "设计区节点 path(如 rz_3)"},
+                "slug": {"type": "string", "description": "候选 slug,可带或不带 _ 前缀"},
+            },
+            "additionalProperties": False,
+        },
+    )
+    async def hide_variant(args: dict[str, Any]) -> dict[str, Any]:
+        """把可见候选 {slug} 改为隐藏 _{slug}(纯文件 rename,不翻 adopted、不删数据)。reveal_variant 的反向。"""
+        project_path = getattr(ctx, "project_path", None)
+        if not project_path:
+            return _error("当前无加载项目(project_path 为空),无法隐藏候选")
+
+        design_zone_id = args["designZoneId"]
+        raw = args["slug"]
+        slug = raw[1:] if raw.startswith("_") else raw
+        if not biz.is_safe_slug(slug):
+            return _error(f"slug 非法 '{raw}':去前缀后须 [a-z0-9-]、长度 1..30")
+
+        dz_root = os.path.join(project_path, "schemes", design_zone_id)
+        visible = os.path.join(dz_root, slug)
+        hidden = os.path.join(dz_root, f"_{slug}")
+        if os.path.isdir(hidden) and not os.path.isdir(visible):
+            return _text(json.dumps(
+                {"slug": slug, "dirName": f"_{slug}", "hidden": False, "note": "已隐藏"},
+                ensure_ascii=False))
+        if not os.path.isdir(visible):
+            return _error(f"可见候选目录不存在: {slug}")
+        # 护栏:禁隐藏已采纳的生效方案(adopted 指向它则隐藏会让指针悬空)
+        try:
+            import re as _re
+            with open(os.path.join(dz_root, "DESIGN.md"), encoding="utf-8") as _f:
+                _m = _re.search(r"(?m)^adopted:\s*(\S+)\s*$", _f.read())
+            if _m:
+                _ad = _m.group(1).strip().strip('"').strip("'")
+                _ad = _ad[1:] if _ad.startswith("_") else _ad
+                if _ad == slug:
+                    return _error(
+                        f"不能隐藏已采纳的生效方案 '{slug}'(父 DESIGN.md adopted 指向它);"
+                        f"请先在画布改采纳别的方案后再隐藏")
+        except OSError:
+            pass
+        os.rename(visible, hidden)
+        return _text(json.dumps(
+            {"slug": slug, "dirName": f"_{slug}", "hidden": True}, ensure_ascii=False))
+
     # ---------- adopt_variant ----------
     @builder.tool(
         "adopt_variant",
