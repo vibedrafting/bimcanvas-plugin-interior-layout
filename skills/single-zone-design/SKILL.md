@@ -4,7 +4,7 @@ description: |
   单设计区完整设计阶段（感知→规划→多方案）的唯一权威流程 SOP。被主控（M1 单区，
   可交互）或 zone-design-agent（M2 多区，静默）加载执行——两处共用本 SOP，设计行为同源。
   Step0 读项目级全屋协调（若有）→ Step1 感知（perception-method）→ Step2 规划双思维
-  （zoning-thinking + sequential-thinking）→ Step3 多方案（multi-variant-diversity），
+  （发散型双思维 zoning+sequential / 收敛型套模板 template-layout）→ Step3 多方案（multi-variant-diversity），
   逐步加载方法 Skill 供能、按 design-doc-upsert 写本区父 DESIGN.md，返回 variants[]+四段。
   多变体（proposedN>1）只做设计阶段、落地交 fanout；单变体（proposedN==1）由 Step4 内联落地（无并行可委托）。
 allowed-tools: Read, Glob, Write, Edit, Skill, mcp__interior-layout__get_zone_boundaries, mcp__interior-layout__register_variant, mcp__interior-layout__set_variant_visibility, mcp__canvas__validate_layout, mcp__canvas__canvas_vision
@@ -42,11 +42,13 @@ IMPORTANT: 必须用工具调用 API（function calling）调用 MCP 工具，�
 2. 按 perception-method 完成 §1 战略定调 + §2 空间骨架，产出 `strategySec`（`## 用户诉求 + 项目基础信息`）与 `spaceSec`（`## 设计区空间骨架`）两节。
 3. `Skill` 加载 `design-doc-upsert`，把两节幂等写入本区父 `schemes/{designZoneId}/DESIGN.md`。
 
-## Step2 · 规划推演（双思维，产 zoningSec + seqSec）
+## Step2 · 规划推演（产 zoningSec + seqSec）
 
-1. `Skill` 加载 `zoning-thinking` + `sequential-thinking`。
-2. 分别产出 `### 方案草稿 · 分区思维`（zoningSec）、`### 方案草稿 · 顺序思维`（seqSec）两子节（只记墙面归属/相邻，不写坐标）。
-3. 按 `design-doc-upsert` 写父「## 方案草稿」节（含上述两子节）。
+**按房型解空间分流加载规划方法**：
+- **收敛型**（房型策略声明"单一最优、不发散"，如卫生间）→ `Skill` 加载 `template-layout`：读房型模板确定性套出单一墙面归属 + 顺序，**免跑探索式双思维**。
+- **发散型**（卧室 / 客厅等）→ `Skill` 加载 `zoning-thinking` + `sequential-thinking`，跑探索式双思维。
+
+两条都产出 `### 方案草稿 · 分区思维`（zoningSec）+ `### 方案草稿 · 顺序思维`（seqSec）两子节（只记墙面归属 / 相邻，不写坐标），按 `design-doc-upsert` 写父「## 方案草稿」节。
 
 ## Step3 · 多方案（产 variants[]）
 
