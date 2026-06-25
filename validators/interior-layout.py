@@ -146,7 +146,8 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
     design_zones = zg.get("designZones") or []
     exclusion_zones = zg.get("exclusionZones") or []
     walls, columns = _load_architecture(project_path)
-    library_ids = _load_library_ids(project_path)
+    openings = _load_openings(project_path)
+    library_ids, nonphysical_ids = _load_library(project_path)
 
     all_diags: list[dict] = []
 
@@ -190,9 +191,10 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
     all_diags.extend(_validate_module_ids(valid_modules, library_ids))
     # 5) 几何校验（E001–E005）
     all_diags.extend(_validate_scheme(valid_modules, design_zones, exclusion_zones,
-                                      walls, columns, target_raw))
-    # 6) 连通性硬闸（E015）：家具不得封死门 / 子区可达，各区 ≥600mm 可达（填 validate 拓扑盲区）
-    all_diags.extend(_validate_reachability(valid_modules, design_zones, exclusion_zones, target_raw))
+                                      walls, columns, target_raw, nonphysical_ids))
+    # 6) 连通性硬闸（E015）：门/窗/家具源点-汇点可达——锚最大 free 块，开口两两互达 + 家具皆可接近
+    all_diags.extend(_validate_reachability(valid_modules, design_zones, exclusion_zones,
+                                            openings, nonphysical_ids, target_raw))
 
     total_modules = len(valid_modules) + skipped
     elapsed = int((time.perf_counter() - t0) * 1000)
@@ -329,7 +331,8 @@ def _validate_module_ids(modules: list[dict], library_ids: Optional[set]) -> lis
 
 # ── 几何校验（镜像 SchemeValidator.Validate）────────────────────
 def _validate_scheme(modules: list[dict], design_zones: list[dict], exclusion_zones: list[dict],
-                     walls: list[dict], columns: list[dict], target_raw: Optional[set]) -> list[dict]:
+                     walls: list[dict], columns: list[dict], target_raw: Optional[set],
+                     nonphysical_ids: set) -> list[dict]:
     diags: list[dict] = []
 
     # zoneCache：Room/Designable + (target None 或 id 命中)；boundary = computed ?? raw
@@ -385,6 +388,9 @@ def _validate_scheme(modules: list[dict], design_zones: list[dict], exclusion_zo
         ma, ba = valid[i]
         for j in range(i + 1, len(valid)):
             mb_, bb = valid[j]
+            # 非实体（地毯/窗帘/椅子）合法叠放：椅塞桌下、毯压床下，不算重叠冲突
+            if _is_nonphysical(ma, nonphysical_ids) or _is_nonphysical(mb_, nonphysical_ids):
+                continue
             if not geometry.aabb_intersects(ba, bb):
                 continue
             info = geometry.overlap_info(ba, bb)
@@ -421,7 +427,8 @@ def _overlap_diag(diags: list[dict], m: dict, mb, obstacle, code: str,
 
 # ── E015 连通性硬闸（北极星：填 validate 拓扑盲区，禁"床封死主卫"类灾难）──
 def _validate_reachability(modules: list[dict], design_zones: list[dict],
-                           exclusion_zones: list[dict], target_raw: Optional[set]) -> list[dict]:
+                           exclusion_zones: list[dict], openings: list[dict],
+                           nonphysical_ids: set, target_raw: Optional[set]) -> list[dict]:
     """家具不得把设计区可走空地切成不可达孤岛，且各区 ≥600mm 可达。
 
     纯 shapely 矢量（Path 1·域内）：
@@ -476,9 +483,11 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     # 通行障碍 = 家具 footprint。禁区(门扇开启区 ez_* 等)是「可走地面」——人就站那儿开门，
     # 不是通行屏障，不计入。实测：把 14 个禁区当障碍 → free 被错切 3 块、NE 翼缩小、腐蚀后 <地板被滤 → 漏判全封。
     # exclusion_zones 参数保留供签名兼容，不参与连通性。
-    module_polys = []  # (id, name, polygon) —— 供"封住孤岛的家具"精确归因
+    module_polys = []  # (id, name, polygon) —— 实体家具：障碍 + 可达汇点 + 归因
     obstacle_polys = []
     for m in modules:
+        if _is_nonphysical(m, nonphysical_ids):
+            continue  # 地毯/窗帘/椅子：不挖 free、不当连通汇点
         p = _poly(m.get("bounds"))
         if p is not None:
             module_polys.append((m.get("id", ""), _name_or_none(m), p))
@@ -533,61 +542,105 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
         return []
 
     reach_pieces = _piece_list(reach)
-    base_n = max(1, len(_piece_list(room_reach)))  # 房间本身在 600mm 通行下的连通块数(建筑基线，吸收异形颈)
-    if len(reach_pieces) <= base_n:
-        return []  # 各区 ≥600mm 互相可达，OK（贴墙细缝/0 宽贴边已被腐蚀滤掉，不误报）
+    base_n = max(1, len(_piece_list(room_reach)))  # 房间在 600mm 通行下的连通块数(建筑基线，吸收异形颈)
+    if not reach_pieces:
+        return []  # 房间在 600mm 下无任何立足点(异形/全被占)——连通性不强报，交由其它诊断
 
-    # 严重度分级：再用 500mm 封死线腐蚀一遍，区分"挤都挤不过去(<500mm，真封死)"与"紧口(500–600mm)"
-    seal_half = 500.0 / 2.0  # 250mm
-    reach500 = free.buffer(-seal_half)
-    rp500 = _piece_list(reach500)
-    main500_dil = unary_union(rp500[:base_n]).buffer(seal_half) if rp500 else None
-    # "区内有没有门"探针：门扇禁区(ez_*)落在不可达区里 = 那里有门要够到
-    door_polys = [pp for pp in (
-        _poly(z.get("rawBoundary") or z.get("computedBoundary"))
-        for z in exclusion_zones if _zone_type(z) == ZONE_EXCLUSION) if pp is not None]
-
-    # 最大的 base_n 块视为可达主区，其余为不可达区
+    # 锚点 = 最大的 base_n 块(无需识别主入口；一组开口两两互达 ⟺ 同属此主区)
     reachable = unary_union(reach_pieces[:base_n])
     reachable_dil = reachable.buffer(half)
-    diags = []
-    for isl_e in reach_pieces[base_n:]:
+    free_pieces = _piece_list(free)               # 未腐蚀连通块(供窗孤岛判 + 归因)
+    main_free = unary_union([p for p in free_pieces if p.intersects(reachable)]) \
+        if free_pieces else reachable
+
+    # 严重度分级线：500mm 二次腐蚀主区，区分 "<500 真封死" 与 "500–600 紧口"
+    seal_half = 500.0 / 2.0  # 250mm
+    try:
+        rp500 = _piece_list(free.buffer(-seal_half))
+    except Exception:  # noqa: BLE001
+        rp500 = []
+    main500 = unary_union(rp500[:base_n]) if rp500 else None
+
+    def _strict_ok(target) -> bool:
+        # 轮廓邻接：存在 600mm 合规站位能够到 target ⟺ target 到主区 ≤300mm(+浮点容差)
         try:
-            real = isl_e.buffer(half).intersection(room)  # 腐蚀块膨胀回去 ∩ 房间 ≈ 真实不可达区(用于 bbox + 归因)
+            return target.distance(reachable) <= half + 1.0
         except Exception:  # noqa: BLE001
-            real = isl_e
-        if real.is_empty:
-            real = isl_e
+            return True  # 几何异常不强报
 
-        # 封死(口<500mm) vs 紧口(500–600mm)：500mm 通行下该区还能不能大体连回主区
-        reach_at_500 = main500_dil is not None and real.intersection(main500_dil).area > real.area * 0.5
-        sealed = not reach_at_500
-        # 区内有没有"要够到的东西"(门 / 家具)，决定是真功能失效还是仅空间浪费
-        has_door = any(real.intersects(dp) for dp in door_polys)
-        has_furn = any(real.intersects(mp) for _, _, mp in module_polys)
-        important = has_door or has_furn
+    def _grade(target) -> str:
+        try:
+            if main500 is not None and target.distance(main500) <= seal_half + 1.0:
+                return "warning"  # 500–600mm 紧口
+        except Exception:  # noqa: BLE001
+            pass
+        return "error"  # <500mm 真封死
 
-        sealers = _sealers_of(real, reachable_dil)
-        txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers) if sealers else "（坐标复算贴该区边界的家具）"
+    def _attribute(target):
+        # 找 target 所在的非主 free 块 + 卡喉家具(复用 _sealers_of)
+        try:
+            tb = target.buffer(1.0)
+            host = next((p for p in free_pieces
+                         if p.intersects(tb) and not p.intersects(reachable)), None)
+            sealers = _sealers_of(host if host is not None else target, reachable_dil)
+        except Exception:  # noqa: BLE001
+            sealers = []
+        txt = "、".join(f"{sid}({snm or '?'})" for sid, snm in sealers) if sealers \
+            else "（坐标复算贴该区边界的家具）"
         pid, pnm = sealers[0] if sealers else ("", None)
-        need = "、".join(t for t, f in (("门", has_door), ("家具", has_furn)) if f)
+        return txt, pid, pnm
 
-        if sealed and important:  # 真功能失效：够不到的门/家具 → error
-            severity = "error"
-            head = f"不可达区 {_bbox_txt(real)}：口宽 <500mm，从主空间走不进去，而区内有{need}要够到（功能失效）"
-            fix = "把卡喉家具挪开 / 缩窄 / 换墙，给该区留 ≥600mm 通行口"
-        elif sealed:  # 空角被围、无门无家具 → 仅浪费，warning
-            severity = "warning"
-            head = f"封闭空角 {_bbox_txt(real)}：被家具围成走不进去的空地（口宽 <500mm），无门无家具——属空间浪费、非功能失效"
-            fix = "无需进入可忽略；想利用则留 ≥600mm 口"
-        else:  # 紧口 500–600mm → warning
-            severity = "warning"
-            head = (f"紧口区 {_bbox_txt(real)}：只能从 500–600mm 的紧口勉强进出"
-                    + (f"（区内有{need}）" if important else "") + "，低于 ≥600mm 次通道底线")
-            fix = "放宽该处通行口到 ≥600mm"
+    diags = []
 
-        diags.append(_diag(E_REGION_UNREACHABLE, severity,
-                           f"{head}——卡喉家具：{txt}。{fix}。", pid, pnm))
+    # ── 门(严格)：必须能走到门口，否则相邻空间不可达 = 功能失效 ──
+    for op in (openings or []):
+        if op.get("type") != 0:
+            continue
+        strip = _opening_strip(op, room)
+        if strip is None or _strict_ok(strip):
+            continue
+        sev = _grade(strip)
+        txt, pid, pnm = _attribute(strip)
+        tail = "（口宽 <500mm，真封死）" if sev == "error" else "（仅 500–600mm 紧口）"
+        diags.append(_diag(
+            E_REGION_UNREACHABLE, sev,
+            f"门 {op.get('id', '')} 不可达 {_bbox_txt(strip)}：从主空间走不到门口{tail}"
+            f"——卡喉家具：{txt}。把卡喉家具挪开 / 缩窄，给门口留 ≥600mm 通行。",
+            pid, pnm))
+
+    # ── 窗(宽松)：只要求不被切进独立孤岛；被家具背靠盖住属有意布置，放过 ──
+    for op in (openings or []):
+        if op.get("type") != 1:
+            continue
+        strip = _opening_strip(op, room)
+        if strip is None:
+            continue
+        try:
+            sf = strip.intersection(free)
+            if sf.is_empty or sf.intersects(main_free):
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        txt, pid, pnm = _attribute(strip)
+        diags.append(_diag(
+            E_REGION_UNREACHABLE, "error",
+            f"窗 {op.get('id', '')} 不可达 {_bbox_txt(strip)}：被家具围进走不进去的孤岛"
+            f"——卡喉家具：{txt}。打通该区到主空间的 ≥600mm 通道。",
+            pid, pnm))
+
+    # ── 实体家具(严格)：每件都要能接近使用 ──
+    for mid, mname, mp in module_polys:
+        if _strict_ok(mp):
+            continue
+        sev = _grade(mp)
+        txt, pid, pnm = _attribute(mp)
+        tail = "（口宽 <500mm）" if sev == "error" else "（仅 500–600mm 紧口）"
+        diags.append(_diag(
+            E_REGION_UNREACHABLE, sev,
+            f"家具 {mid}({mname or '?'}) 不可达 {_bbox_txt(mp)}：被围住够不到、无法使用{tail}"
+            f"——卡喉家具：{txt}。留 ≥600mm 接近通道。",
+            mid, mname))
+
     return diags
 
 
@@ -674,11 +727,74 @@ def _load_architecture(project_path: str) -> tuple[list[dict], list[dict]]:
     return arch.get("walls") or [], arch.get("columns") or []
 
 
-def _load_library_ids(project_path: str) -> Optional[set]:
+def _load_openings(project_path: str) -> list[dict]:
+    """读 baseline/openings.json（门窗）；缺文件 → 空列表，静默降级。
+
+    纯几何消费（line + facingDirection），不涉拓扑。type: 0=门 1=窗。
+    """
+    arr = _read_json(os.path.join(project_path, "baseline", "openings.json"))
+    return arr if isinstance(arr, list) else []
+
+
+def _load_library(project_path: str) -> tuple[Optional[set], set]:
+    """读模块库 → (id 集, 非实体 id 集)。
+
+    physical 缺省 / true = 占地实体；仅显式 physical:false 才计入非实体集
+    （地毯 / 窗帘 / 椅子等：不挖 free、不当连通汇点、E005 重叠豁免）。
+    id 集为 None 表示库缺失（降级，E011 不报）。
+    """
     lib = _read_json(os.path.join(project_path, "modules", "module_library.json"))
     if not isinstance(lib, dict) or not isinstance(lib.get("modules"), list):
+        return None, set()
+    ids, nonphys = set(), set()
+    for m in lib["modules"]:
+        mid = m.get("id")
+        if not mid:
+            continue
+        ids.add(str(mid).lower())
+        if m.get("physical") is False:
+            nonphys.add(str(mid).lower())
+    return ids, nonphys
+
+
+def _is_nonphysical(m: dict, nonphysical_ids: set) -> bool:
+    """模块是否非实体（按 moduleId 查非实体集）。"""
+    mid = m.get("moduleId")
+    return bool(mid) and str(mid).lower() in nonphysical_ids
+
+
+def _opening_strip(op: dict, room):
+    """开口室内侧 threshold 薄带：line 沿 facingDirection 向室内挤出 ~300mm，再 ∩ room。
+
+    返回 shapely 几何或 None（shapely 缺失 / 数据不全 / 裁剪后为空）。
+    """
+    try:
+        from shapely.geometry import Polygon
+    except Exception:  # noqa: BLE001
         return None
-    return {str(m.get("id", "")).lower() for m in lib["modules"] if m.get("id")}
+    line = op.get("line")
+    fd = op.get("facingDirection")
+    if not line or len(line) != 2 or not fd or len(fd) != 2:
+        return None
+    try:
+        x1, y1 = float(line[0][0]), float(line[0][1])
+        x2, y2 = float(line[1][0]), float(line[1][1])
+        fx, fy = float(fd[0]), float(fd[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    n = math.hypot(fx, fy)
+    if n < 1e-9:
+        return None
+    depth = REACH_MIN_PASSAGE_MM / 2.0  # 300mm
+    fx, fy = fx / n * depth, fy / n * depth
+    try:
+        poly = Polygon([(x1, y1), (x2, y2), (x2 + fx, y2 + fy), (x1 + fx, y1 + fy)])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        s = poly.intersection(room)
+        return s if (not s.is_empty and s.area > 0) else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ── modules 文件读写 ────────────────────────────────────────────

@@ -285,6 +285,7 @@
     },
     {
       "id": "mod_chair_001",
+      "physical": false,
       "name": "书椅",
       "tags": [
         "study",
@@ -667,6 +668,7 @@
     },
     {
       "id": "mod_curtain",
+      "physical": false,
       "name": "窗帘",
       "tags": [
         "sleep",
