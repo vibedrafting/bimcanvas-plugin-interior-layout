@@ -6,8 +6,8 @@ description: |
   Step0 读项目级全屋协调（若有）→ Step1 感知（perception-method）→ Step2 规划双思维
   （zoning-thinking + sequential-thinking）→ Step3 多方案（multi-variant-diversity），
   逐步加载方法 Skill 供能、按 design-doc-upsert 写本区父 DESIGN.md，返回 variants[]+四段。
-  本 SOP 只管设计阶段，不做坐标级落地（落地由调用方接 fanout）。
-allowed-tools: Read, Glob, Write, Edit, Skill, mcp__interior-layout__get_zone_boundaries, mcp__canvas__canvas_vision
+  多变体（proposedN>1）只做设计阶段、落地交 fanout；单变体（proposedN==1）由 Step4 内联落地（无并行可委托）。
+allowed-tools: Read, Glob, Write, Edit, Skill, mcp__interior-layout__get_zone_boundaries, mcp__interior-layout__register_variant, mcp__interior-layout__set_variant_visibility, mcp__canvas__validate_layout, mcp__canvas__canvas_vision
 ---
 
 # 单设计区设计流程 SOP（感知→规划→多方案）
@@ -54,21 +54,40 @@ IMPORTANT: 必须用工具调用 API（function calling）调用 MCP 工具，�
 2. 收割双草稿，产出 `variants[]`（每项 `slug` / `direction` / `narrative` / `anchorSeed` / `avoidance` / `expectedWalls`）+ `proposedN` + `excluded[]`；**自查各 `expectedWalls` 归一化后两两不同**（雷同合并、减数），落地集 ≤4。
 3. 按 `design-doc-upsert` 写父「## 多方案战略层概述」节。
 
-## 返回（设计阶段产物，交调用方接落地）
+## Step4 · 单变体内联落地（仅 `proposedN == 1` 时）
 
-按以下结构返回（= `ZONE_DESIGN_SCHEMA`）：
+多变体（`proposedN > 1`）才需要并行扇出落地；单变体无并行可委托——**`proposedN == 1` 时，由你（设计执行者，已在本上下文）直接落地这唯一变体，不交 fanout**。
+
+1. `Skill` 加载 `placement-procedure`，以 Step3 产出的那个变体（其 `slug` / `direction` / `narrative` / `anchorSeed` / `avoidance` 作 `variantContext`）+ 已在上下文的四段上游材料为入参，**完整执行落地**（register_variant → 施工简报 → 施工 modules.json → validate → 识图自评 → 自优化 → 成功才 `set_variant_visibility(visible:true)` → 自检与优化记录）。
+2. 落地完**内联一次模块数复核**（自落少了 fanout 的独立 validate 闸门）：`Read` 该方案 modules.json 数模块数，与 `validate_layout` 解析到的模块数比对，不一致 = 落地未成（多半路径错），按 placement-procedure 修正或如实 `ok:false`。
+3. 返回「已落地」结果（见下 B）。
+
+> WHY：fanout 是为**多变体并行**而设；单变体走它只是空套一层 workflow + 让 haiku 落地分身做坐标。你（主控 / zone-design-agent）就在上下文里，直接落地更省、坐标质量更高（叠加房型 `【自查·坐标】` 锚一次做对）。`proposedN > 1` 仍走 fanout 不变。
+
+## 返回（按是否已内联落地分两种）
+
+**A. `proposedN > 1`（多变体，待 fanout 落地）**——按 `ZONE_DESIGN_SCHEMA` 返回：
 
 ```
-{ designZoneId, ok:true,
+{ designZoneId, ok:true, landed:false,
   variants: [{slug, direction, narrative, anchorSeed, avoidance, expectedWalls}],
   strategySec, spaceSec, zoningSec, seqSec }
 ```
+- `variants` + 四段 = 下游 `interior-layout-fanout` 落地脚本的入参契约，调用方据此吐 Workflow。
 
-- `variants` + 四段 = 下游 `interior-layout-fanout` 落地脚本的入参契约，直接对接。
-- 设计阶段无法产出有效方案（户型/诉求矛盾不可解）时,返回 `{ designZoneId, ok:false, reason:"一句话原因" }`,**不强行凑方案**。
+**B. `proposedN == 1`（已 Step4 内联落地）**——返回：
+
+```
+{ designZoneId, ok:true, landed:true,
+  slug, factsheet, comparisonTableMd }
+```
+- `landed:true` 告诉调用方**无需再吐 fanout**，直接收尾（写父「方案对比」节、引导用户在画布采纳）。
+- `comparisonTableMd` = 单方案对比表（含该方案 factsheet 要点），由你机械拼出。
+
+**失败**：设计阶段无法产出有效方案（户型/诉求矛盾不可解）时返回 `{ designZoneId, ok:false, reason:"一句话原因" }`；单变体落地认输时透传 placement-procedure 的 `ok:false` + reason，**不强行凑成功**。
 
 ## 边界与红线
 
-- **本 SOP 只做设计阶段（Step1-3）**：不做坐标级落地、不调 `register_variant`/`validate_layout`、不翻 `adopted` 指针。落地由调用方负责（M1 主控吐 fanout / M2 全屋 workflow 调 fanout）。
+- **落地分流**：`proposedN > 1` 时本 SOP 只做设计阶段（Step1-3），不碰坐标级落地，交调用方吐 fanout；**`proposedN == 1` 时由本 SOP Step4 内联落地**（唯一例外，因无并行可委托，落地由设计执行者就地完成）。两种情况都**不翻 `adopted` 指针**（终选归用户）。
 - 写盘只写本区 `schemes/{designZoneId}/` 下文件，**不碰其它设计区、不碰项目级 `schemes/DESIGN.md`**（项目级是主控单一写者）。
 - 失败即失败、如实 `ok:false`，禁补救凑成功。

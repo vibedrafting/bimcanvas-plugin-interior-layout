@@ -45,8 +45,12 @@ schemes/
 识别为 M1 后:先**解析设计区** `designZoneId`(设计区节点 path,可多段如 `rz_6/dz_客厅`):若用户未明确指向单一设计区,先问清,不要替用户臆断。再收集用户本轮原始诉求原文 `originalUserRequest`。
 
 1. **加载 SOP 自跑设计阶段**:`Skill` 加载 `single-zone-design`,以**执行模式 = interactive**(可交互主控)按 SOP 执行 Step0-3(读项目级协调若有 → 感知 → 规划双思维 → 多方案)。SOP 会逐步加载 perception-method / zoning-thinking / sequential-thinking / multi-variant-diversity 供能,并按 `design-doc-upsert` 把 Step1-3 各节写入父 `schemes/{designZoneId}/DESIGN.md`。
-2. SOP 返回 `variants[]`(落地集,已去重 ≤4)+ 四段上游材料(`strategySec` / `spaceSec` / `zoningSec` / `seqSec`)。
-3. **吐扇出 workflow 落地**:用 `Workflow` 拉 `interior-layout-fanout`(见下「委托扇出铁律」),`args` 传 `designZoneId` + SOP 返回的 `variants` + 四段。
+2. SOP 按 `proposedN` 分两种返回:
+   - **`landed:false`(多变体,`proposedN>1`)**:返回 `variants[]`(落地集,已去重 ≤4)+ 四段上游材料(`strategySec` / `spaceSec` / `zoningSec` / `seqSec`)——待 fanout 落地。
+   - **`landed:true`(单变体,`proposedN==1`)**:SOP Step4 已内联落地,返回 `slug` + `factsheet` + `comparisonTableMd`——已落地,无需 fanout。
+3. **落地分流**:
+   - `landed:false` → 用 `Workflow` 拉 `interior-layout-fanout`(见下「委托扇出铁律」),`args` 传 `designZoneId` + `variants` + 四段。
+   - `landed:true` → **不吐 Workflow**,直接进收尾(SOP 已落地,`comparisonTableMd` 由 SOP 返回)。
 4. **收尾**:见下「收尾职责」。
 
 > SOP 返回 `ok:false` 时按「失败红线」如实透传,**不**吐 fanout、不补救。
