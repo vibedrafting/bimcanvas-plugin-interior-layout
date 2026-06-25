@@ -628,18 +628,10 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
             f"——卡喉家具：{txt}。打通该区到主空间的 ≥600mm 通道。",
             pid, pnm))
 
-    # ── 实体家具(严格)：每件都要能接近使用 ──
-    for mid, mname, mp in module_polys:
-        if _strict_ok(mp):
-            continue
-        sev = _grade(mp)
-        txt, pid, pnm = _attribute(mp)
-        tail = "（口宽 <500mm）" if sev == "error" else "（仅 500–600mm 紧口）"
-        diags.append(_diag(
-            E_REGION_UNREACHABLE, sev,
-            f"家具 {mid}({mname or '?'}) 不可达 {_bbox_txt(mp)}：被围住够不到、无法使用{tail}"
-            f"——卡喉家具：{txt}。留 ≥600mm 接近通道。",
-            mid, mname))
+    # ── 实体家具可达：已移除 ──
+    # 旧严格判据 distance(footprint, reachable)≤300 要求每件家具四边都有 600mm 净空，
+    # 误伤贴床小件(床头柜)与满铺隔断(淋浴屏)，逼 agent 规避 E015 删家具(金凤127 事故)。
+    # 家具仍作障碍参与门/窗连通、仍参与 _sealers_of 归因；"家具必可达"诉求待用 facing 朝向面重做。
 
     return diags
 
