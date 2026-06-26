@@ -25,9 +25,9 @@ allowed-tools: Read
 | **感知**（读空间 / 定调） | `references/spatial_design.md` + `references/design_evaluation.md` | 用品质维度作空间阅读判据；此阶段**房型中立、不放家具** → 不读放置法则 / 房型范式 / 模块库 |
 | **规划推演**（分区 + 顺序） | `references/spatial_design.md` + `references/furniture_placement.md` + `references/{roomType}.md` | 组织空间 + 通用放置法则 + 房型选墙范式 |
 | **多方案**（差异化生成） | `references/furniture_placement.md` + `references/{roomType}.md` + `references/design_evaluation.md` | 主家具清单/法则 + 合格底线判据 |
-| **落地**（施工 + 自评 + 自优化） | `references/spatial_design.md` + `references/furniture_placement.md` + `references/{roomType}.md` + `references/design_evaluation.md` + **`projectMount/modules/module_library.json`** | 落地需全量：法则 + 房型 + 物本体 + 识图维度 |
+| **落地**（施工 + 自评 + 自优化） | `references/spatial_design.md` + `references/furniture_placement.md` + `references/{roomType}.md` + `references/design_evaluation.md` + **`modules/module_library.json`** | 落地需全量：法则 + 房型 + 物本体 + 识图维度 |
 
-> `module_library.json` 例外：它是家具物本体、被 validators/Web 等非 AI 方共用，**留在项目 `projectMount/modules/`**，不在本 Skill 目录；落地阶段从项目路径读它。
+> `module_library.json` 例外：它是家具物本体、被 validators/Web 等非 AI 方共用，**物化在项目根 `modules/`**（打开项目时由插件 `projectMount/modules/` 物化到此，故运行时路径是 `modules/` 而非 `projectMount/modules/`），不在本 Skill 目录；落地阶段从项目路径读它。
 
 ## 纪律
 
