@@ -193,7 +193,7 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
     all_diags.extend(_validate_scheme(valid_modules, design_zones, exclusion_zones,
                                       walls, columns, target_raw, overlap_exempt))
     # 6) 连通性硬闸（E015）：门/窗开口源点-汇点可达——锚最大 free 块，开口两两互达
-    all_diags.extend(_validate_reachability(valid_modules, design_zones, exclusion_zones,
+    all_diags.extend(_validate_reachability(valid_modules, design_zones,
                                             openings, circulation_exempt, target_raw))
 
     total_modules = len(valid_modules) + skipped
@@ -427,14 +427,15 @@ def _overlap_diag(diags: list[dict], m: dict, mb, obstacle, code: str,
 
 # ── E015 连通性硬闸（北极星：填 validate 拓扑盲区，禁"床封死主卫"类灾难）──
 def _validate_reachability(modules: list[dict], design_zones: list[dict],
-                           exclusion_zones: list[dict], openings: list[dict],
-                           circulation_exempt: set, target_raw: Optional[set]) -> list[dict]:
-    """家具不得把设计区可走空地切成不可达孤岛，且各区 ≥600mm 可达。
+                           openings: list[dict], circulation_exempt: set,
+                           target_raw: Optional[set]) -> list[dict]:
+    """门/窗开口源点-汇点可达校验（纯 shapely）。
 
-    纯 shapely 矢量（Path 1·域内）：
-      free = 设计区多边形 − union(家具 footprint) − union(禁区)。
-      ① 鲁棒底·全封死：free 显著连通块数 > 设计区原连通块数 → 有被封死孤岛（门/子区开口被盖死）→ E015。
-      ② ≥600mm 精度：free 连通但 buffer(-300) 后显著块数变多 → 仅靠 <600mm 窄口相连 → E015。
+    free = 设计区多边形 − union(solid 家具 footprint)；锚 = 腐蚀(-300)后最大的 base_n 连通块。
+    无需识别主入口——一组开口两两互达 ⟺ 同属锚块。
+      - 门（type=0）：strip 到锚 ≤300mm 否则报；<500=error / 500–600=warning。
+      - 窗（type=1）：strip 邻接 free 不连锚块（被切进独立孤岛）→ error；被家具背靠盖住放过。
+    mounted/overlay（窗帘/淋浴屏/地毯/椅子）不挖 free。家具可达汇点已移除（见文件尾历史）。
     shapely 不可用 / 几何异常 → 静默跳过（不阻断 validate；其余 E001–E014 仍承担）。
     """
     try:
@@ -480,10 +481,9 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     if room_n == 0:
         return []
 
-    # 通行障碍 = 家具 footprint。禁区(门扇开启区 ez_* 等)是「可走地面」——人就站那儿开门，
+    # 通行障碍 = solid 家具 footprint。禁区(门扇开启区 ez_* 等)是「可走地面」——人就站那儿开门，
     # 不是通行屏障，不计入。实测：把 14 个禁区当障碍 → free 被错切 3 块、NE 翼缩小、腐蚀后 <地板被滤 → 漏判全封。
-    # exclusion_zones 参数保留供签名兼容，不参与连通性。
-    module_polys = []  # (id, name, polygon) —— solid/mounted 障碍 + 归因
+    module_polys = []  # (id, name, polygon) —— solid 家具：障碍 + 归因
     obstacle_polys = []
     for m in modules:
         if _in_exempt(m, circulation_exempt):
