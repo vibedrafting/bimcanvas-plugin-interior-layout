@@ -285,7 +285,7 @@
     },
     {
       "id": "mod_chair_001",
-      "physical": false,
+      "physicality": "overlay",
       "name": "书椅",
       "tags": [
         "study",
@@ -393,8 +393,8 @@
     },
     {
       "id": "mod_shower_linear",
+      "physicality": "mounted",
       "name": "一字型淋浴屏",
-      "physical": false,
       "tags": [
         "shower"
       ],
@@ -418,7 +418,7 @@
         ],
         "relation_rules": [
           "【必须】形成干湿分离的尽端空间",
-          "【必须】满铺连两墙即可：本屏按可穿过隔断建模（门洞隐含、physical:false），满铺不会触发可达性 E015 报错——禁为进出留缺口、禁因 E015 缩短或删除本屏"
+          "【必须】满铺连两墙即可：本屏 physicality=mounted（可穿过隔断、门洞隐含）——E015 不挡通行、满铺不报不可达；但仍占墙面，禁为进出留缺口、禁因 E015 缩短或删除本屏"
         ]
       },
       "description": "定制一字型淋浴屏",
@@ -670,7 +670,7 @@
     },
     {
       "id": "mod_curtain",
-      "physical": false,
+      "physicality": "mounted",
       "name": "窗帘",
       "tags": [
         "sleep",

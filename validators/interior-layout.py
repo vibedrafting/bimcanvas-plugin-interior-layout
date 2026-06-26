@@ -147,7 +147,7 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
     exclusion_zones = zg.get("exclusionZones") or []
     walls, columns = _load_architecture(project_path)
     openings = _load_openings(project_path)
-    library_ids, nonphysical_ids = _load_library(project_path)
+    library_ids, circulation_exempt, overlap_exempt = _load_library(project_path)
 
     all_diags: list[dict] = []
 
@@ -191,10 +191,10 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
     all_diags.extend(_validate_module_ids(valid_modules, library_ids))
     # 5) 几何校验（E001–E005）
     all_diags.extend(_validate_scheme(valid_modules, design_zones, exclusion_zones,
-                                      walls, columns, target_raw, nonphysical_ids))
-    # 6) 连通性硬闸（E015）：门/窗/家具源点-汇点可达——锚最大 free 块，开口两两互达 + 家具皆可接近
+                                      walls, columns, target_raw, overlap_exempt))
+    # 6) 连通性硬闸（E015）：门/窗开口源点-汇点可达——锚最大 free 块，开口两两互达
     all_diags.extend(_validate_reachability(valid_modules, design_zones, exclusion_zones,
-                                            openings, nonphysical_ids, target_raw))
+                                            openings, circulation_exempt, target_raw))
 
     total_modules = len(valid_modules) + skipped
     elapsed = int((time.perf_counter() - t0) * 1000)
@@ -332,7 +332,7 @@ def _validate_module_ids(modules: list[dict], library_ids: Optional[set]) -> lis
 # ── 几何校验（镜像 SchemeValidator.Validate）────────────────────
 def _validate_scheme(modules: list[dict], design_zones: list[dict], exclusion_zones: list[dict],
                      walls: list[dict], columns: list[dict], target_raw: Optional[set],
-                     nonphysical_ids: set) -> list[dict]:
+                     overlap_exempt: set) -> list[dict]:
     diags: list[dict] = []
 
     # zoneCache：Room/Designable + (target None 或 id 命中)；boundary = computed ?? raw
@@ -388,8 +388,8 @@ def _validate_scheme(modules: list[dict], design_zones: list[dict], exclusion_zo
         ma, ba = valid[i]
         for j in range(i + 1, len(valid)):
             mb_, bb = valid[j]
-            # 非实体（地毯/窗帘/椅子）合法叠放：椅塞桌下、毯压床下，不算重叠冲突
-            if _is_nonphysical(ma, nonphysical_ids) or _is_nonphysical(mb_, nonphysical_ids):
+            # overlay（地毯/椅子）合法叠放：椅塞桌下、毯压床下，豁免 E005；mounted（窗帘/淋浴屏）仍参与
+            if _in_exempt(ma, overlap_exempt) or _in_exempt(mb_, overlap_exempt):
                 continue
             if not geometry.aabb_intersects(ba, bb):
                 continue
@@ -428,7 +428,7 @@ def _overlap_diag(diags: list[dict], m: dict, mb, obstacle, code: str,
 # ── E015 连通性硬闸（北极星：填 validate 拓扑盲区，禁"床封死主卫"类灾难）──
 def _validate_reachability(modules: list[dict], design_zones: list[dict],
                            exclusion_zones: list[dict], openings: list[dict],
-                           nonphysical_ids: set, target_raw: Optional[set]) -> list[dict]:
+                           circulation_exempt: set, target_raw: Optional[set]) -> list[dict]:
     """家具不得把设计区可走空地切成不可达孤岛，且各区 ≥600mm 可达。
 
     纯 shapely 矢量（Path 1·域内）：
@@ -483,11 +483,11 @@ def _validate_reachability(modules: list[dict], design_zones: list[dict],
     # 通行障碍 = 家具 footprint。禁区(门扇开启区 ez_* 等)是「可走地面」——人就站那儿开门，
     # 不是通行屏障，不计入。实测：把 14 个禁区当障碍 → free 被错切 3 块、NE 翼缩小、腐蚀后 <地板被滤 → 漏判全封。
     # exclusion_zones 参数保留供签名兼容，不参与连通性。
-    module_polys = []  # (id, name, polygon) —— 实体家具：障碍 + 可达汇点 + 归因
+    module_polys = []  # (id, name, polygon) —— solid/mounted 障碍 + 归因
     obstacle_polys = []
     for m in modules:
-        if _is_nonphysical(m, nonphysical_ids):
-            continue  # 地毯/窗帘/椅子：不挖 free、不当连通汇点
+        if _in_exempt(m, circulation_exempt):
+            continue  # mounted/overlay（窗帘/淋浴屏/地毯/椅子）：不挖 free、不当连通障碍
         p = _poly(m.get("bounds"))
         if p is not None:
             module_polys.append((m.get("id", ""), _name_or_none(m), p))
@@ -728,31 +728,44 @@ def _load_openings(project_path: str) -> list[dict]:
     return arr if isinstance(arr, list) else []
 
 
-def _load_library(project_path: str) -> tuple[Optional[set], set]:
-    """读模块库 → (id 集, 非实体 id 集)。
+def _load_library(project_path: str) -> tuple[Optional[set], set, set]:
+    """读模块库 → (id 集, circulation_exempt, overlap_exempt)。
 
-    physical 缺省 / true = 占地实体；仅显式 physical:false 才计入非实体集
-    （地毯 / 窗帘 / 椅子等：不挖 free、不当连通汇点、E005 重叠豁免）。
+    physicality 枚举决定两类豁免（缺省 solid）：
+      - circulation_exempt = mounted ∪ overlay → E015 不当通行障碍（窗帘/淋浴屏/地毯/椅子）；
+      - overlap_exempt     = overlay           → E005 重叠豁免（地毯/椅子；mounted 仍参与，占墙面受保护）。
     id 集为 None 表示库缺失（降级，E011 不报）。
     """
     lib = _read_json(os.path.join(project_path, "modules", "module_library.json"))
     if not isinstance(lib, dict) or not isinstance(lib.get("modules"), list):
-        return None, set()
-    ids, nonphys = set(), set()
+        return None, set(), set()
+    ids, circ, ovl = set(), set(), set()
     for m in lib["modules"]:
         mid = m.get("id")
         if not mid:
             continue
-        ids.add(str(mid).lower())
-        if m.get("physical") is False:
-            nonphys.add(str(mid).lower())
-    return ids, nonphys
+        k = str(mid).lower()
+        ids.add(k)
+        ph = _physicality(m)
+        if ph in ("mounted", "overlay"):
+            circ.add(k)
+        if ph == "overlay":
+            ovl.add(k)
+    return ids, circ, ovl
 
 
-def _is_nonphysical(m: dict, nonphysical_ids: set) -> bool:
-    """模块是否非实体（按 moduleId 查非实体集）。"""
+def _physicality(m: dict) -> str:
+    """physicality 枚举 → 'solid'|'mounted'|'overlay'；缺省 / 非法值 = 'solid'。零兼容旧 physical。"""
+    v = m.get("physicality")
+    if isinstance(v, str) and v.strip().lower() in ("solid", "mounted", "overlay"):
+        return v.strip().lower()
+    return "solid"
+
+
+def _in_exempt(m: dict, id_set: set) -> bool:
+    """模块 moduleId 是否在给定豁免集。"""
     mid = m.get("moduleId")
-    return bool(mid) and str(mid).lower() in nonphysical_ids
+    return bool(mid) and str(mid).lower() in id_set
 
 
 def _opening_strip(op: dict, room):
