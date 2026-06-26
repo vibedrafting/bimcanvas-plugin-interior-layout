@@ -135,7 +135,7 @@ IMPORTANT: 必须使用工具调用 API（function calling）调用 MCP 工具�
 ```
 
 - **【必须·真因 bounds 4 顶点】**`bounds`：矩形 4 顶点，**顺序 左下→右下→右上→左上，单位 mm**，不能省略。
-- `moduleId` 取 `module_library.json` 中该模块 `id` 的**原值**（如 `mod_basin_001`）——**禁加实例后缀**（写成 `mod_basin_001_001` 会与库不匹配、报 E011）；实例的唯一编号写在 `id`（`m_xxxx`）字段，不混进 `moduleId`。`moduleName` 必填，与 `module_library.json` 一致；`items` 必填，无子项写 `[]`。
+- `moduleId` 取 `module_library.json` 中该模块 `id` 的**原值**（如 `mod_basin_001`）——**禁加实例后缀**（写成 `mod_basin_001_001` 会与库不匹配、报 E011）。**实例 `id`（`m_xxxxxxxx`）字段【不要写】——留空或整字段省略，由系统在 `validate_layout`/落盘时自动补全为全局唯一 id；手写的顺序号/语义名（`m_001`/`m_curtain` 等）跨设计区不唯一，聚合进统一模型会撞号。**`moduleName` 必填，与 `module_library.json` 一致；`items` 必填，无子项写 `[]`。
 - `facing` 写成对象 `{ "value": [x,y] | null, "semantic": string | null }`；**推荐**默认写 `semantic`（8 个标准方向词之一），`value` 留 `null`。
 
 ## Step D2：落位自检（按图施工正确性核对）

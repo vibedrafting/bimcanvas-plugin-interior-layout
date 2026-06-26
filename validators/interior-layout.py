@@ -28,6 +28,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import random
+import re
 import sys
 import time
 from typing import Optional
@@ -118,6 +120,7 @@ def _run_normalize(request: dict, project_path: str) -> dict:
         if wrapper is None:
             continue
         modules = wrapper["modules"]
+        normalized_count += _normalize_ids(modules)
         diags, n = _normalize_facings(modules)
         diagnostics.extend(diags)
         normalized_count += n
@@ -159,6 +162,7 @@ def _run_validate(request: dict, project_path: str, target_raw: Optional[set]) -
         if wrapper is None:
             continue
         modules = wrapper["modules"]
+        _normalize_ids(modules)
         diags, _ = _normalize_facings(modules)
         all_diags.extend(diags)
         for m in modules:
@@ -255,6 +259,36 @@ def _path_issue_diags(path_issues) -> list[dict]:
                 f"规范路径：{expected}；请保留规范路径并人工合并/删除错误路径",
                 zone_id, None, actual, "moduleFile"))
     return out
+
+
+# ── 实例 id 归一（与 Web shortId.ts / Core Module.GenerateModuleId 同格式）─
+# 格式契约：^m_[0-9a-z]{8}$（权威定义见 docs/Schema.md）。
+# 空 / 非法格式 / 文件内重复 → 重新生成。落盘由 writeback 持久化（=确定性写盘点，
+# 保证 id 稳定，满足 MergeService 按 id 匹配；Core OnDeserialized 只兜"空"、不在读取时改写）。
+_MODULE_ID_RE = re.compile(r"^m_[0-9a-z]{8}$")
+_MODULE_ID_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _generate_module_id() -> str:
+    return "m_" + "".join(random.choice(_MODULE_ID_CHARS) for _ in range(8))
+
+
+def _normalize_ids(modules: list[dict]) -> int:
+    """空 / 非法 / 文件内重复的实例 id → 重新生成。返回修正条数。"""
+    seen: set[str] = set()
+    fixed = 0
+    for m in modules:
+        mid = m.get("id")
+        if isinstance(mid, str) and _MODULE_ID_RE.match(mid) and mid not in seen:
+            seen.add(mid)
+            continue
+        new_id = _generate_module_id()
+        while new_id in seen:
+            new_id = _generate_module_id()
+        seen.add(new_id)
+        m["id"] = new_id
+        fixed += 1
+    return fixed
 
 
 # ── facing 规范化（镜像 ModuleNormalizationService.NormalizeFacings）─
