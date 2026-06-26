@@ -8,17 +8,22 @@ export const meta = {
 }
 
 // ── 入口 args 契约（主控为脑：感知/规划/多方案在主控单上下文已完成，此处只做并行扇出）──
-const designZoneId = args?.designZoneId                 // 必填，单段或多段 path，如 rz_3 或 rz_6/dz_1
+// 健壮性归一：部分模型/代理把 Workflow 的 args 序列化成 JSON 字符串而非对象（实测 deepseek 多次
+// 秒失败 "args.designZoneId 必填"）。字符串则 JSON.parse 兜底，并 log 告警让契约漂移可见、不静默掩盖。
+const a = (typeof args === 'string')
+  ? (log('⚠ args 以字符串到达，已 JSON.parse 归一（producer 未按对象传参）'), JSON.parse(args))
+  : (args || {})
+const designZoneId = a.designZoneId                     // 必填，单段或多段 path，如 rz_3 或 rz_6/dz_1
 if (!designZoneId) throw new Error('args.designZoneId 必填')
-const variantsIn = Array.isArray(args?.variants) ? args.variants : []
+const variantsIn = Array.isArray(a.variants) ? a.variants : []
 if (!variantsIn.length) throw new Error('args.variants 必填（主控产出的方向层变体集，非空）')
 // 主控已做 N 自适应 + 上限 4；此处防御性 slice，避免 runaway 扇出
 const variants = variantsIn.slice(0, 4)
 // 上游材料由主控直传，供 placement 读，免读父 DESIGN.md
-const strategySec = args?.strategySec || ''
-const spaceSec    = args?.spaceSec || ''
-const zoningSec   = args?.zoningSec || ''
-const seqSec      = args?.seqSec || ''
+const strategySec = a.strategySec || ''
+const spaceSec    = a.spaceSec || ''
+const zoningSec   = a.zoningSec || ''
+const seqSec      = a.seqSec || ''
 
 // ── 结构化输出 schema ───────────────────────────────────────────
 // 【契约·三处同名钉死】Step4 返回字段须与 ① 本 PLACEMENT_SCHEMA ② placement-procedure skill「Step H」③ comparisonBlock 读取一致。

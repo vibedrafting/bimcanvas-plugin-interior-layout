@@ -9,10 +9,14 @@ export const meta = {
 
 // ── 入口 args 契约（契约③）──────────────────────────────────────
 // 【契约·钉死】designZones 由主控全屋核产出；fanoutScriptPath 由主控用「插件根 + /workflows/interior-layout-fanout.workflow.js」拼好直传（避免按名解析风险）。
-const designZones = Array.isArray(args?.designZones) ? args.designZones : []
+// 健壮性归一：部分模型/代理把 args 序列化成 JSON 字符串而非对象（实测 deepseek 秒失败）。字符串则 JSON.parse + log 告警。
+const a = (typeof args === 'string')
+  ? (log('⚠ args 以字符串到达，已 JSON.parse 归一（producer 未按对象传参）'), JSON.parse(args))
+  : (args || {})
+const designZones = Array.isArray(a.designZones) ? a.designZones : []
 if (!designZones.length) throw new Error('args.designZones 必填（非空，每项 {designZoneId, tags, zoneRequest}）')
-const originalUserRequest = args?.originalUserRequest || ''
-const fanoutScriptPath = args?.fanoutScriptPath
+const originalUserRequest = a.originalUserRequest || ''
+const fanoutScriptPath = a.fanoutScriptPath
 if (!fanoutScriptPath) throw new Error('args.fanoutScriptPath 必填（内层落地脚本 interior-layout-fanout 的绝对路径）')
 
 // ── 结构化输出 schema（契约②，与 single-zone-design SOP 返回、zone-design-agent 一致）──
