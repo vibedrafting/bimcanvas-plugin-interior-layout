@@ -60,7 +60,7 @@ IMPORTANT: 必须用工具调用 API（function calling）调用 MCP 工具，�
 
 多变体（`proposedN > 1`）才需要并行扇出落地；单变体无并行可委托——**`proposedN == 1` 时，由你（设计执行者，已在本上下文）直接落地这唯一变体，不交 fanout**。
 
-1. `Skill` 加载 `placement-procedure`，以 Step3 产出的那个变体（其 `slug` / `direction` / `narrative` / `anchorSeed` / `avoidance` 作 `variantContext`）+ 已在上下文的四段上游材料为入参，**完整执行落地**（register_variant → 施工简报 → 施工 modules.json → validate → 识图自评 → 自优化 → 成功才 `set_variant_visibility(visible:true)` → 自检与优化记录）。
+1. `Skill` 加载 `placement-procedure`，以 Step3 产出的那个变体（其 `slug` / `direction` / `narrative` / `anchorSeed` / `avoidance` 作 `variantContext`）+ 已在上下文的四段上游材料为入参，**完整执行落地**（register_variant 注册即可见 → 施工简报 → 施工 modules.json → validate → 识图自评 → 自优化 → **认输才 `set_variant_visibility(visible:false)` 隐藏** → 自检与优化记录）。
 2. 落地完**内联一次模块数复核**（自落少了 fanout 的独立 validate 闸门）：`Read` 该方案 modules.json 数模块数，与 `validate_layout` 解析到的模块数比对，不一致 = 落地未成（多半路径错），按 placement-procedure 修正或如实 `ok:false`。
 3. 返回「已落地」结果（见下 B）。
 
